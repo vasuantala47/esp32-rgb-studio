@@ -1,0 +1,2631 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Preferences.h>
+#include <math.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+// Forward declaration
+void processIncomingChar(char c);
+
+// ====================================================================
+// 🔵 BLUETOOTH LOW ENERGY (NORDIC UART SERVICE)
+// ====================================================================
+#define BLE_SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+BLEServer *pBleServer = nullptr;
+BLECharacteristic *pBleTxCharacteristic = nullptr;
+bool bleDeviceConnected = false;
+bool oldBleDeviceConnected = false;
+
+class MyBleServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        bleDeviceConnected = true;
+        Serial.println("\r\n[BLE] Web Client Connected via Bluetooth!");
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        bleDeviceConnected = false;
+        Serial.println("\r\n[BLE] Web Client Disconnected from Bluetooth!");
+    }
+};
+
+class MyBleRxCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string rxValue = pCharacteristic->getValue();
+        if (rxValue.length() > 0) {
+            for (size_t i = 0; i < rxValue.length(); i++) {
+                processIncomingChar(rxValue[i]);
+            }
+            processIncomingChar('\n');
+        }
+    }
+};
+
+// ====================================================================
+// 🛠️ HARDWARE & NETWORK CONFIGURATION
+// ====================================================================
+#define PHYSICAL_RGB_PIN 48
+uint8_t rgbPin = PHYSICAL_RGB_PIN; // Physical GPIO 48 for onboard WS2812 RGB LED
+uint8_t masterBrightness = 100;    // 0 - 100% (Default 100% for maximum vivid punch!)
+
+// Wi-Fi Access Point Configuration
+const char* ap_ssid = "ESP32-RGB-Studio";
+const char* ap_pass = "12345678"; // At least 8 characters
+
+WebServer server(80);
+Preferences preferences;
+
+// ====================================================================
+// 🎭 20 LIGHTING MODES & STATE ENGINE
+// ====================================================================
+int currentMode = 1;
+bool autoCycle = false;
+unsigned long lastAutoSwitch = 0;
+const unsigned long AUTO_CYCLE_INTERVAL = 10000;
+
+// Static Solid Color Storage (Free Light / Lamp)
+uint8_t staticR = 255, staticG = 200, staticB = 140;
+
+// Dynamic Audio Beat Reactive State
+volatile unsigned long lastBeatTime = 0;
+volatile uint8_t beatR = 255, beatG = 255, beatB = 255;
+volatile uint8_t beatIntensity = 255;
+volatile uint16_t beatDecayMs = 480;
+
+// Custom User / AI Step Sequence Structure
+struct SequenceStep {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint32_t durationMs;
+    bool fade;
+};
+
+const int MAX_CUSTOM_STEPS = 32;
+SequenceStep customSteps[MAX_CUSTOM_STEPS];
+int customStepCount = 0;
+int currentCustomIndex = 0;
+unsigned long stepStartTime = 0;
+
+String terminalBuffer = "";
+bool isSerialCommand = false;
+String serialCmdBuffer = "";
+bool menuPrinted = false;
+
+// ====================================================================
+// 🎨 COLOR & LED DRIVER
+// ====================================================================
+void setRGB(uint8_t r, uint8_t g, uint8_t b) {
+    float bri = (float)masterBrightness / 100.0f;
+    uint8_t adjR = (uint8_t)(r * bri);
+    uint8_t adjG = (uint8_t)(g * bri);
+    uint8_t adjB = (uint8_t)(b * bri);
+    neopixelWrite(rgbPin, adjR, adjG, adjB);
+}
+
+void setHSV(float h, float s, float v) {
+    h = fmodf(h, 360.0f);
+    if (h < 0) h += 360.0f;
+    float c = v * s;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    float r = 0, g = 0, b = 0;
+    if (h < 60)       { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else              { r = c; g = 0; b = x; }
+    setRGB((uint8_t)((r + m) * 255), (uint8_t)((g + m) * 255), (uint8_t)((b + m) * 255));
+}
+
+// ====================================================================
+// 🌟 20 HANDCRAFTED PRESET ALGORITHMS
+// ====================================================================
+void modeAurora(unsigned long now) {
+    float wave1 = (sinf(now / 1200.0f) + 1.0f) / 2.0f;
+    float wave2 = (cosf(now / 1900.0f) + 1.0f) / 2.0f;
+    float hue = 120.0f + (wave1 * 60.0f) + (wave2 * 50.0f);
+    setHSV(hue, 0.95f, 0.5f + 0.5f * wave1);
+}
+
+void modeCyberpunk(unsigned long now) {
+    unsigned long cycle = now % 2400;
+    if (cycle < 1200) {
+        float p = (float)cycle / 1200.0f;
+        float pulse = sinf(p * 3.14159f);
+        setRGB((uint8_t)(255 * pulse), 0, (uint8_t)(140 * pulse));
+    } else {
+        float p = (float)(cycle - 1200) / 1200.0f;
+        float pulse = sinf(p * 3.14159f);
+        setRGB(0, (uint8_t)(240 * pulse), (uint8_t)(255 * pulse));
+    }
+}
+
+void modeCampfire(unsigned long now) {
+    static float flameBri = 0.8f;
+    float flicker = (random(70, 100) / 100.0f);
+    flameBri = flameBri * 0.7f + flicker * 0.3f;
+    float wave = (sinf(now / 160.0f) + 1.0f) / 2.0f;
+    uint8_t r = (uint8_t)(255 * flameBri);
+    uint8_t g = (uint8_t)((40 + wave * 55) * flameBri);
+    uint8_t b = (uint8_t)((wave > 0.85f ? 15 : 0) * flameBri);
+    setRGB(r, g, b);
+}
+
+void modeRainbow(unsigned long now) {
+    float hue = fmodf((now / 12.0f), 360.0f);
+    setHSV(hue, 1.0f, 1.0f);
+}
+
+void modeStrobe(unsigned long now) {
+    unsigned long cycle = now % 900;
+    if (cycle < 120) {
+        setRGB((cycle % 40 < 20) ? 255 : 0, 0, 0);
+    } else if (cycle >= 120 && cycle < 200) {
+        setRGB(0, 0, 0);
+    } else if (cycle >= 200 && cycle < 320) {
+        setRGB(0, 0, (cycle % 40 < 20) ? 255 : 0);
+    } else {
+        setRGB(0, 0, 0);
+    }
+}
+
+void modeBreathingWhite(unsigned long now) {
+    float wave = (sinf(now / 800.0f) + 1.0f) / 2.0f;
+    float bri = 0.05f + 0.95f * (wave * wave);
+    setRGB((uint8_t)(255 * bri), (uint8_t)(245 * bri), (uint8_t)(230 * bri));
+}
+
+void modeTrafficLight(unsigned long now) {
+    unsigned long cycle = now % 6000;
+    if (cycle < 2500) setRGB(255, 0, 0);
+    else if (cycle < 3500) setRGB(255, 160, 0);
+    else setRGB(0, 255, 0);
+}
+
+void modeLightning(unsigned long now) {
+    static unsigned long nextStrike = 0;
+    static unsigned long flashDuration = 0;
+    static int burstCount = 0;
+    static bool inFlash = false;
+
+    if (now > nextStrike && !inFlash) {
+        burstCount = random(2, 6);
+        inFlash = true;
+        flashDuration = now + random(20, 60);
+        nextStrike = now + random(2500, 6500);
+    }
+    if (inFlash) {
+        if (now < flashDuration) setRGB(255, 255, 255);
+        else {
+            burstCount--;
+            if (burstCount > 0) {
+                flashDuration = now + random(30, 80);
+                nextStrike = now + random(50, 150);
+            } else inFlash = false;
+            setRGB(5, 10, 30);
+        }
+    } else setRGB(5, 10, 30);
+}
+
+void modePartyBeat(unsigned long now) {
+    unsigned long cycle = now % 450;
+    float decay = expf(-((float)cycle / 120.0f));
+    static float baseHue = 0;
+    if (cycle < 20) baseHue = fmodf(baseHue + 67.0f, 360.0f);
+    setHSV(baseHue, 1.0f, decay);
+}
+
+// 🪩 Dynamic Multi-Intensity Beat Reactive with Analog Cosine Ease-Out Glow
+void modeBeatReactive(unsigned long now) {
+    if (beatIntensity < 10) {
+        setRGB(0, 0, 0); // Sudden Beat Drop / Pause / Silence: 100% Instant Blackout!
+        return;
+    }
+    unsigned long elapsed = now - lastBeatTime;
+    if (elapsed < beatDecayMs) {
+        float progress = (float)elapsed / (float)beatDecayMs;
+        // Cosine ease-out: bold, punchy impact that gently tapers with a warm, lingering analog glow!
+        float factor = 0.5f * (1.0f + cosf(3.14159265f * progress)) * ((float)beatIntensity / 255.0f);
+        setRGB((uint8_t)(beatR * factor), (uint8_t)(beatG * factor), (uint8_t)(beatB * factor));
+    } else {
+        setRGB(0, 0, 0);
+    }
+}
+
+void modeThriller(unsigned long now) {
+    unsigned long cycle = now % 8000;
+    if (cycle < 4500) {
+        float b = 0.08f + 0.25f * ((sinf(now / 1000.0f) + 1.0f) / 2.0f);
+        setRGB((uint8_t)(220 * b), 0, (uint8_t)(40 * b));
+    } else if (cycle >= 4500 && cycle < 4650) {
+        setRGB(255, 255, 255); // Jump-scare flash
+    } else if (cycle >= 4650 && cycle < 4800) {
+        setRGB(0, 0, 0);       // Pitch-black silence
+    } else if (cycle >= 4800 && cycle < 4950) {
+        setRGB(255, 10, 0);    // Blood-red pulse
+    } else {
+        float fade = 1.0f - ((float)(cycle - 4950) / 3050.0f);
+        setRGB((uint8_t)(140 * fade), 0, (uint8_t)(20 * fade));
+    }
+}
+
+void modePeace(unsigned long now) {
+    float wave = (sinf(now / 3500.0f) + 1.0f) / 2.0f;
+    float hue = 175.0f + (wave * 90.0f);
+    float bri = 0.45f + (0.40f * sinf(now / 2000.0f));
+    setHSV(hue, 0.65f, bri);
+}
+
+void modeOcean(unsigned long now) {
+    float wave = (sinf(now / 2200.0f) + 1.0f) / 2.0f;
+    float hue = 190.0f + (wave * 45.0f);
+    float bri = 0.4f + 0.6f * wave;
+    setHSV(hue, 0.9f, bri);
+}
+
+void modeVolcano(unsigned long now) {
+    float wave = (sinf(now / 1100.0f) + 1.0f) / 2.0f;
+    uint8_t r = 255;
+    uint8_t g = (uint8_t)(35 + wave * 65);
+    uint8_t b = (random(0, 100) > 96) ? 90 : 0;
+    setRGB(r, g, b);
+}
+
+void modeForest(unsigned long now) {
+    float wave = (sinf(now / 2400.0f) + 1.0f) / 2.0f;
+    float hue = 110.0f + (wave * 35.0f);
+    float firefly = (random(0, 100) > 94) ? 0.35f : 0.0f;
+    setHSV(hue, 0.95f, 0.45f + 0.35f * wave + firefly);
+}
+
+void modeCandle(unsigned long now) {
+    float f1 = sinf(now / 150.0f);
+    float f2 = sinf(now / 67.0f);
+    float f3 = (random(85, 100) / 100.0f);
+    float bri = (0.65f + 0.22f * f1 + 0.13f * f2) * f3;
+    if (bri > 1.0f) bri = 1.0f;
+    setRGB((uint8_t)(255 * bri), (uint8_t)(140 * bri), (uint8_t)(20 * bri));
+}
+
+void modeNeonTokyo(unsigned long now) {
+    unsigned long cycle = now % 3000;
+    float p = (float)cycle / 3000.0f;
+    if (p < 0.33f) setRGB(255, 0, 140);
+    else if (p < 0.66f) setRGB(140, 0, 255);
+    else setRGB(0, 245, 255);
+}
+
+void modeGlacier(unsigned long now) {
+    float wave = (sinf(now / 2000.0f) + 1.0f) / 2.0f;
+    uint8_t g = (uint8_t)(180 + wave * 75);
+    uint8_t r = (uint8_t)(120 + wave * 135);
+    setRGB(r, g, 255);
+}
+
+void modeMatrix(unsigned long now) {
+    static unsigned long nextGlitch = 0;
+    if (now > nextGlitch) {
+        setRGB(0, 255, 60);
+        nextGlitch = now + random(150, 600);
+    } else {
+        setRGB(0, random(15, 55), 8);
+    }
+}
+
+void runCustomSequence(unsigned long now) {
+    if (customStepCount == 0) return;
+
+    SequenceStep cur = customSteps[currentCustomIndex];
+    unsigned long elapsed = now - stepStartTime;
+
+    if (elapsed >= cur.durationMs) {
+        currentCustomIndex = (currentCustomIndex + 1) % customStepCount;
+        stepStartTime = now;
+        cur = customSteps[currentCustomIndex];
+        elapsed = 0;
+    }
+
+    if (!cur.fade) {
+        setRGB(cur.r, cur.g, cur.b);
+    } else {
+        int nextIdx = (currentCustomIndex + 1) % customStepCount;
+        SequenceStep nxt = customSteps[nextIdx];
+        float progress = (float)elapsed / (float)cur.durationMs;
+        uint8_t r = (uint8_t)(cur.r + (nxt.r - cur.r) * progress);
+        uint8_t g = (uint8_t)(cur.g + (nxt.g - cur.g) * progress);
+        uint8_t b = (uint8_t)(cur.b + (nxt.b - cur.b) * progress);
+        setRGB(r, g, b);
+    }
+}
+
+// ====================================================================
+// 🌐 EMBEDDED WEB DASHBOARD HTML / CSS / JAVASCRIPT
+// ====================================================================
+const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ESP32 AI RGB Pro Studio</title>
+  <style>
+    :root {
+      --bg: #0b0e17;
+      --card-bg: rgba(22, 27, 44, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.4);
+      --pink: #ec4899;
+      --cyan: #06b6d4;
+      --red: #ef4444;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding-bottom: 70px; min-height: 100vh; overflow-x: hidden; }
+
+    /* Glass Header */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(11, 14, 23, 0.88); backdrop-filter: blur(12px);
+      padding: 12px 16px; border-bottom: 1px solid var(--card-border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo-group { display: flex; align-items: center; gap: 8px; }
+    .logo-group h1 { font-size: 1.05rem; font-weight: 800; background: linear-gradient(135deg, #a855f7, #6366f1, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .status-pill { font-size: 0.68rem; padding: 3px 8px; border-radius: 12px; background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 700; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    /* Live Virtual LED Preview Orb */
+    .preview-bar {
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      padding: 14px 16px; background: rgba(18, 22, 36, 0.6); border-bottom: 1px solid var(--card-border);
+    }
+    .led-orb {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 0 24px rgba(255,255,255,0.7), inset 0 0 10px rgba(0,0,0,0.5);
+      transition: background 0.04s ease, box-shadow 0.04s ease;
+      border: 2px solid rgba(255,255,255,0.25);
+    }
+    .led-info { font-size: 0.8rem; }
+    .led-info b { display: block; font-size: 0.9rem; color: #fff; }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      display: flex; background: rgba(18, 22, 36, 0.95);
+      border-bottom: 1px solid var(--card-border); padding: 4px; gap: 4px;
+      position: sticky; top: 57px; z-index: 99;
+    }
+    .tab-btn {
+      flex: 1; padding: 9px 4px; font-size: 0.72rem; font-weight: 700;
+      background: transparent; color: var(--subtext); border: none; border-radius: 8px;
+      cursor: pointer; transition: all 0.2s; text-align: center;
+    }
+    .tab-btn.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px var(--accent-glow); }
+
+    /* Container & Card Layout */
+    .container { max-width: 580px; margin: 0 auto; padding: 12px; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .card {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 14px; padding: 14px; margin-bottom: 12px;
+      backdrop-filter: blur(8px);
+    }
+    .card-title {
+      font-size: 0.8rem; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--subtext); margin-bottom: 10px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    /* Master Power & Brightness */
+    .power-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn-power {
+      flex: 1; padding: 10px; border-radius: 10px; font-weight: 700; font-size: 0.8rem;
+      border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn-off { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    .slider-box { display: flex; flex-direction: column; gap: 6px; }
+    .slider-header { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--subtext); }
+    input[type=range] {
+      -webkit-appearance: none; width: 100%; height: 7px; border-radius: 5px;
+      background: #1e2538; outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent); cursor: pointer; box-shadow: 0 0 10px var(--accent);
+    }
+
+    /* 💡 Free Ambient Light (Solid Lamp) */
+    .lamp-presets-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;
+    }
+    .lamp-preset-btn {
+      padding: 9px 4px; border-radius: 8px; border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.04); color: var(--text); font-size: 0.72rem;
+      font-weight: 700; cursor: pointer; text-align: center; transition: all 0.15s;
+    }
+    .lamp-preset-btn:active { transform: scale(0.96); filter: brightness(1.2); }
+
+    /* 📊 Real-Time Sound & Beat Monitor HUD */
+    .hud-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+    }
+    .btn-hud-stop {
+      background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 4px 12px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; cursor: pointer;
+    }
+    .btn-hud-stop:hover { background: #ef4444; color: #fff; }
+
+    #visualizer-canvas {
+      width: 100%; height: 60px; background: #05070c; border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08); display: block; margin-bottom: 8px;
+    }
+    .meter-container { display: flex; flex-direction: column; gap: 5px; }
+    .meter-row { display: flex; align-items: center; gap: 8px; font-size: 0.7rem; }
+    .meter-name { width: 95px; color: var(--subtext); font-weight: 600; }
+    .meter-bar-bg { flex: 1; height: 6px; background: #131724; border-radius: 3px; overflow: hidden; }
+    .meter-bar-fill { height: 100%; width: 0%; border-radius: 3px; transition: width 0.04s ease; }
+    .meter-val { width: 36px; text-align: right; font-family: monospace; font-size: 0.68rem; color: #fff; }
+
+    .beat-indicator-box {
+      margin-top: 8px; padding: 6px 10px; border-radius: 6px;
+      background: rgba(0, 0, 0, 0.3); border: 1px solid var(--card-border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .beat-badge {
+      font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border-radius: 4px;
+    }
+    .beat-badge.normal { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; }
+    .beat-badge.peak { background: #ef4444; color: #fff; box-shadow: 0 0 10px #ef4444; animation: flashHit 0.25s ease-out; }
+    .beat-badge.drop { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+    @keyframes flashHit { from { transform: scale(1.08); } to { transform: scale(1); } }
+
+    /* 🎨 12 Music Light Modes & Moods */
+    .music-modes-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px;
+    }
+    .music-mode-btn {
+      padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.03); color: var(--text); font-size: 0.72rem;
+      font-weight: 700; cursor: pointer; text-align: left; transition: all 0.15s;
+    }
+    .music-mode-btn.active {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(236, 72, 153, 0.3));
+      border-color: var(--accent); color: #fff; box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* Earbuds Beat Engine */
+    .sync-card { border: 1px solid rgba(99, 102, 241, 0.35); background: linear-gradient(180deg, rgba(30, 27, 75, 0.4), var(--card-bg)); }
+    .btn-sync-toggle {
+      width: 100%; padding: 12px; border-radius: 10px; font-weight: 800; font-size: 0.85rem;
+      background: linear-gradient(135deg, var(--accent), var(--pink)); color: #fff;
+      border: none; cursor: pointer; box-shadow: 0 4px 14px var(--accent-glow);
+      display: flex; align-items: center; justify-content: center; gap: 8px; transition: transform 0.1s;
+    }
+    .btn-sync-toggle:active { transform: scale(0.98); }
+    .btn-sync-toggle.active { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 14px rgba(16,185,129,0.4); }
+
+    .genre-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .genre-chip {
+      font-size: 0.7rem; font-weight: 700; padding: 5px 10px; border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05); color: var(--subtext); border: 1px solid var(--card-border);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .genre-chip.active { background: rgba(99, 102, 241, 0.25); color: #c7d2fe; border-color: var(--accent); }
+
+    .btn-tap {
+      width: 100%; margin-top: 10px; padding: 10px; border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06); border: 1px dashed rgba(255, 255, 255, 0.2);
+      color: var(--text); font-weight: 700; font-size: 0.75rem; cursor: pointer;
+    }
+    .btn-tap:active { background: rgba(99, 102, 241, 0.3); border-color: var(--accent); }
+
+    /* Audio Sources & MP3 Player */
+    .player-card { border: 1px solid rgba(6, 182, 212, 0.3); }
+    .player-controls { display: flex; gap: 8px; margin-top: 6px; }
+    .file-label, .btn-play-song {
+      flex: 1; padding: 8px; border-radius: 8px; font-size: 0.72rem; font-weight: 700;
+      text-align: center; cursor: pointer; border: 1px solid var(--card-border);
+    }
+    .file-label { background: rgba(6, 182, 212, 0.15); color: #67e8f9; }
+    .btn-play-song { background: rgba(168, 85, 247, 0.15); color: #d8b4fe; }
+
+    .btn-src {
+      width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border);
+      color: var(--text); cursor: pointer; font-size: 0.75rem; text-align: left; margin-bottom: 6px;
+    }
+    .btn-src:hover { background: rgba(255, 255, 255, 0.07); }
+
+    /* Gemini AI Chat */
+    .gemini-card { border: 1px solid rgba(168, 85, 247, 0.3); background: linear-gradient(180deg, rgba(88, 28, 135, 0.2), var(--card-bg)); }
+    .quick-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+    .ai-chip {
+      font-size: 0.68rem; padding: 3px 7px; border-radius: 5px;
+      background: rgba(168, 85, 247, 0.15); color: #e9d5ff; border: 1px solid rgba(168, 85, 247, 0.25);
+      cursor: pointer;
+    }
+    .ai-chat-box { display: flex; gap: 6px; }
+    .ai-input {
+      flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--card-border);
+      background: #0b0e17; color: #fff; font-size: 0.78rem; outline: none;
+    }
+    .btn-gemini-send {
+      padding: 8px 14px; border-radius: 8px; border: none; font-weight: 700; font-size: 0.78rem;
+      background: linear-gradient(135deg, #a855f7, #6366f1); color: #fff; cursor: pointer;
+    }
+    .ai-bubble {
+      margin-top: 8px; padding: 10px; border-radius: 8px;
+      background: rgba(0, 0, 0, 0.4); border: 1px solid var(--card-border);
+      font-size: 0.75rem; line-height: 1.4; display: none;
+    }
+
+    /* 20 Presets Grid */
+    .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .preset-btn {
+      padding: 9px 8px; border-radius: 8px; border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.03); color: var(--text); font-size: 0.72rem;
+      font-weight: 600; cursor: pointer; text-align: left; transition: all 0.15s;
+    }
+    .preset-btn:hover { background: rgba(99, 102, 241, 0.2); border-color: var(--accent); }
+
+    /* Custom Palette & Timeline */
+    .palette-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 10px; }
+    .swatch { height: 32px; border-radius: 6px; cursor: pointer; border: 1px solid rgba(255,255,255,0.15); }
+    .timeline {
+      display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; min-height: 50px;
+    }
+    .timeline-item {
+      flex: 0 0 54px; height: 42px; border-radius: 6px; position: relative;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 0.65rem; font-weight: 700; color: #fff; text-shadow: 0 1px 2px #000;
+    }
+    .timeline-item .del {
+      position: absolute; top: -4px; right: -4px; width: 14px; height: 14px;
+      background: #ef4444; border-radius: 50%; font-size: 9px; line-height: 14px;
+      text-align: center; cursor: pointer;
+    }
+    .form-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .btn-add {
+      width: 100%; padding: 8px; border-radius: 8px; font-weight: 700; font-size: 0.75rem;
+      background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3);
+      cursor: pointer; margin-bottom: 6px;
+    }
+    .seq-actions { display: flex; gap: 6px; }
+    .btn-play {
+      flex: 2; padding: 9px; border-radius: 8px; font-weight: 700; font-size: 0.78rem;
+      background: var(--accent); color: #fff; border: none; cursor: pointer;
+    }
+    .btn-clear {
+      flex: 1; padding: 9px; border-radius: 8px; font-weight: 700; font-size: 0.78rem;
+      background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); cursor: pointer;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000;
+      display: none; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-box {
+      background: #161b2c; border: 1px solid var(--accent); border-radius: 12px;
+      padding: 16px; max-width: 440px; width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-group">
+    <span style="font-size:1.3rem;">✨</span>
+    <div>
+      <h1 style="font-size:1.02rem; line-height:1.1;">ESP32 RGB PRO</h1>
+      <div style="font-size:0.62rem; color:var(--subtext);">Bluetooth &bull; USB &bull; Wi-Fi</div>
+    </div>
+  </div>
+  <div style="display:flex; gap:6px; align-items:center;">
+    <span class="status-pill" id="ble-status-pill" style="background:rgba(99,102,241,0.15); color:#a5b4fc; border-color:rgba(99,102,241,0.3);">⚪ BLE Ready</span>
+    <button id="btn-ble-connect" onclick="toggleBluetoothConnect()" style="background:linear-gradient(135deg,#4f46e5,#06b6d4); color:#fff; border:none; border-radius:10px; font-size:0.68rem; font-weight:700; padding:6px 10px; cursor:pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 8px rgba(79,70,229,0.35);">
+      <span>🔵</span> Connect Bluetooth
+    </button>
+  </div>
+</header>
+
+<!-- Live Virtual LED Preview Orb -->
+<div class="preview-bar">
+  <div class="led-orb" id="virtual-led"></div>
+  <div class="led-info">
+    <b id="active-mode-title">Mode: Aurora Borealis</b>
+    <span id="active-rgb-val" style="color:var(--subtext); font-size:0.75rem;">RGB(0, 0, 0)</span>
+  </div>
+</div>
+
+<!-- Navigation Tabs -->
+<div class="nav-tabs">
+  <button class="tab-btn active" onclick="switchTab('tab-sync')">🎧 Earbuds Sync</button>
+  <button class="tab-btn" onclick="switchTab('tab-gemini')">🤖 Gemini AI</button>
+  <button class="tab-btn" onclick="switchTab('tab-presets')">🎭 20 Presets</button>
+  <button class="tab-btn" onclick="switchTab('tab-custom')">🛠️ Studio & Wi-Fi</button>
+</div>
+
+<div class="container">
+
+  <!-- ==================== TAB 1: 🎧 EARBUDS & MUSIC SYNC ==================== -->
+  <div id="tab-sync" class="tab-content active">
+
+    <!-- Master Power & Brightness -->
+    <div class="card">
+      <div class="power-row">
+        <button class="btn-power btn-off" onclick="setMode(0)">⏻ Turn LED OFF</button>
+      </div>
+      <div class="slider-box">
+        <div class="slider-header">
+          <span>Master Brightness (Punchy Output)</span>
+          <span id="bright-val">100%</span>
+        </div>
+        <input type="range" id="bright-slider" min="0" max="100" value="100" oninput="onBrightness(this.value)">
+      </div>
+    </div>
+
+    <!-- 💡 FREE AMBIENT LIGHT (SOLID LAMP - CONTINUOUS ON) -->
+    <div class="card" style="border: 1px solid rgba(245, 158, 11, 0.4); background: linear-gradient(180deg, rgba(120, 53, 15, 0.2), var(--card-bg));">
+      <div class="card-title" style="color:#fde68a;">
+        <span>💡 Free Ambient Light (Solid Lamp)</span>
+        <span style="font-size:0.68rem; color:#f59e0b; font-weight:700;">STAYS 100% ON</span>
+      </div>
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:8px;">
+        Solid steady glow without blinking or audio pulsing:
+      </div>
+      <div class="lamp-presets-grid">
+        <button class="lamp-preset-btn" onclick="setLampColor(255, 140, 40)" style="background:rgba(255, 140, 40, 0.2); border-color:#ff9800;">🕯️ Candle</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(255, 205, 130)" style="background:rgba(255, 205, 130, 0.2); border-color:#f59e0b;">🛋️ 3000K Warm</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(220, 240, 255)" style="background:rgba(220, 240, 255, 0.2); border-color:#06b6d4;">❄️ 6000K Cool</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(255, 80, 20)" style="background:rgba(255, 80, 20, 0.2); border-color:#ef4444;">🌅 Sunset</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(255, 60, 150)" style="background:rgba(255, 60, 150, 0.2); border-color:#ec4899;">🌸 Pink</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(0, 200, 255)" style="background:rgba(0, 200, 255, 0.2); border-color:#0284c7;">🌊 Ocean</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(0, 255, 120)" style="background:rgba(0, 255, 120, 0.2); border-color:#10b981;">🌿 Emerald</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(180, 0, 255)" style="background:rgba(180, 0, 255, 0.2); border-color:#a855f7;">🔮 Purple</button>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.3); padding:6px 10px; border-radius:8px; border:1px solid var(--card-border);">
+        <span style="font-size:0.75rem; color:var(--text); font-weight:700;">Custom Free Lamp Color:</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="color" id="lamp-free-picker" value="#ffc882" oninput="onLampHexColor(this.value)" style="border:none; width:36px; height:28px; border-radius:6px; cursor:pointer;">
+          <span id="lamp-hex-display" style="font-size:0.75rem; font-family:monospace; color:var(--subtext);">#FFC882</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 📊 REAL-TIME SOUND & BEAT MONITOR HUD -->
+    <div class="card" style="border-color: rgba(99, 102, 241, 0.35);">
+      <div class="hud-header">
+        <div class="card-title" style="margin-bottom:0;">📊 Real-Time Sound & Beat Monitor</div>
+        <button class="btn-hud-stop" onclick="stopAllAudio()">⏹️ STOP</button>
+      </div>
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:6px;" id="hud-status">
+        Ready • Start Earbuds Beat or Play Song below
+      </div>
+
+      <canvas id="visualizer-canvas"></canvas>
+
+      <!-- Multi-Band Instrument Meters -->
+      <div class="meter-container">
+        <div class="meter-row">
+          <div class="meter-name">🥁 Kick / Sub-Bass</div>
+          <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-bass" style="background:#ef4444;"></div></div>
+          <div class="meter-val" id="val-bass">0%</div>
+        </div>
+        <div class="meter-row">
+          <div class="meter-name">🎸 Mids / Vocals</div>
+          <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-mids" style="background:#06b6d4;"></div></div>
+          <div class="meter-val" id="val-mids">0%</div>
+        </div>
+        <div class="meter-row">
+          <div class="meter-name">🎺 Treble / Snare</div>
+          <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-treble" style="background:#f59e0b;"></div></div>
+          <div class="meter-val" id="val-treble">0%</div>
+        </div>
+      </div>
+
+      <!-- Beat Status & Drop Detector -->
+      <div class="beat-indicator-box">
+        <div>
+          <span style="font-size:0.7rem; color:var(--subtext);">BEAT STATUS:</span>
+          <div class="beat-badge normal" id="beat-status-badge">Waiting for sound...</div>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:0.7rem; color:var(--subtext);">ACTIVE COLOR:</span>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
+            <div id="live-color-chip" style="width:14px; height:14px; border-radius:50%; background:#6366f1; border:1px solid #fff;"></div>
+            <span id="live-color-hex" style="font-size:0.72rem; font-weight:700;">#6366F1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⏱️ Audio Timing Tuning (Earbuds Bluetooth Latency Compensation) -->
+      <div class="slider-box" style="margin-top:10px;">
+        <div class="slider-header">
+          <span>⏱️ Earbuds Audio Sync Tuning (Offset)</span>
+          <b id="offset-val" style="color:var(--cyan);">0 ms (Instant)</b>
+        </div>
+        <input type="range" id="offset-slider" min="-150" max="150" value="0" step="10" oninput="onOffsetChange(this.value)">
+      </div>
+
+      <!-- ⏱️ Beat Speed & Pacing -->
+      <div style="margin-top:8px;">
+        <span style="font-size:0.7rem; color:var(--subtext); font-weight:700;">⏱️ BEAT PACING (Steady & Musical Rhythm):</span>
+        <div class="genre-chips" style="margin-top:4px;">
+          <span class="genre-chip active" id="pace-clean" onclick="setPace('clean')">🥁 Clean Beat (Steady ~120 BPM)</span>
+          <span class="genre-chip" id="pace-fast" onclick="setPace('fast')">⚡ Fast Club (180 BPM)</span>
+          <span class="genre-chip" id="pace-chill" onclick="setPace('chill')">🧘 Mellow Pulse (80 BPM)</span>
+        </div>
+      </div>
+
+      <!-- 🎨 12 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR -->
+      <div style="margin-top:10px;">
+        <span style="font-size:0.7rem; color:var(--subtext); font-weight:700;">🎨 MUSIC LIGHT MODES (12 MOODS + FREE CUSTOM COLOR):</span>
+        <div class="music-modes-grid">
+          <button class="music-mode-btn active" id="mode-cyber" onclick="setMusicMode('cyber')">🌆 Cyberpunk</button>
+          <button class="music-mode-btn" id="mode-fire" onclick="setMusicMode('fire')">🔥 Fire & Bass</button>
+          <button class="music-mode-btn" id="mode-disco" onclick="setMusicMode('disco')">🪩 Disco Party</button>
+          <button class="music-mode-btn" id="mode-edm" onclick="setMusicMode('edm')">⚡ EDM White Burst</button>
+          <button class="music-mode-btn" id="mode-thrill" onclick="setMusicMode('thrill')">🦇 Thriller Red</button>
+          <button class="music-mode-btn" id="mode-zen" onclick="setMusicMode('zen')">🧘 Zen Ambient</button>
+          <button class="music-mode-btn" id="mode-pitch" onclick="setMusicMode('pitch')">🌈 Chroma Pitch</button>
+          <button class="music-mode-btn" id="mode-ocean" onclick="setMusicMode('ocean')">🌊 Deep Ocean</button>
+          <button class="music-mode-btn" id="mode-acid" onclick="setMusicMode('acid')">🎆 Acid Rave</button>
+          <button class="music-mode-btn" id="mode-volcano" onclick="setMusicMode('volcano')">🌋 Volcano Lava</button>
+          <button class="music-mode-btn" id="mode-gold" onclick="setMusicMode('gold')">💡 Gold Acoustic</button>
+          <button class="music-mode-btn" id="mode-ice" onclick="setMusicMode('ice')">❄️ Glacier Ice</button>
+          <button class="music-mode-btn" id="mode-free" onclick="setMusicMode('free')" style="grid-column:span 2; background:linear-gradient(135deg, rgba(236,72,153,0.25), rgba(99,102,241,0.25)); border-color:var(--accent);">🎨 Free Custom Beat Color (Pick Any Color)</button>
+        </div>
+      </div>
+
+      <!-- 🎨 FREE MUSIC BEAT COLOR PICKER & QUICK SWATCHES -->
+      <div id="free-music-color-panel" style="margin-top:10px; padding:10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.75rem; font-weight:700; color:var(--accent);">🎨 Free Music Beat Color</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <input type="color" id="free-music-picker" value="#00f5ff" oninput="setFreeMusicColor(this.value)" style="border:none; width:34px; height:26px; border-radius:6px; cursor:pointer;">
+            <span id="free-color-preview-hex" style="font-size:0.72rem; font-weight:700; color:var(--text);">#00F5FF</span>
+          </div>
+        </div>
+        <!-- Quick 1-touch Color Swatches -->
+        <div style="display:grid; grid-template-columns:repeat(8, 1fr); gap:5px; margin-bottom:8px;">
+          <div onclick="setFreeMusicColor('#ff0055')" style="height:22px; border-radius:4px; background:#ff0055; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Neon Pink"></div>
+          <div onclick="setFreeMusicColor('#ff4500')" style="height:22px; border-radius:4px; background:#ff4500; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Orange Flame"></div>
+          <div onclick="setFreeMusicColor('#ffcc00')" style="height:22px; border-radius:4px; background:#ffcc00; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Warm Gold"></div>
+          <div onclick="setFreeMusicColor('#00ff66')" style="height:22px; border-radius:4px; background:#00ff66; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Lime Neon"></div>
+          <div onclick="setFreeMusicColor('#00f5ff')" style="height:22px; border-radius:4px; background:#00f5ff; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Electric Cyan"></div>
+          <div onclick="setFreeMusicColor('#0066ff')" style="height:22px; border-radius:4px; background:#0066ff; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Royal Blue"></div>
+          <div onclick="setFreeMusicColor('#a855f7')" style="height:22px; border-radius:4px; background:#a855f7; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Deep Purple"></div>
+          <div onclick="setFreeMusicColor('#ffffff')" style="height:22px; border-radius:4px; background:#ffffff; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" title="Pure Strobe White"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:var(--subtext);">
+          <span>⚡ White Kick Accent:</span>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="chk-free-white-kick" checked>
+            <span style="color:var(--text);">Flash white on heavy kick drops</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🎧 EARBUDS BEAT SYNC ENGINE (Zero Lag, Works Without Mic) -->
+    <div class="card sync-card">
+      <div class="card-title">🎧 Earbuds Beat Sync Engine (Spotify / BT Earbuds)</div>
+      <button class="btn-sync-toggle" id="btn-sync-toggle" onclick="toggleEarbudsSync()">
+        <span id="sync-icon">▶</span>
+        <span id="sync-text">START EARBUDS BEAT: ON</span>
+      </button>
+
+      <!-- Genre Rhythms -->
+      <div class="genre-chips">
+        <span class="genre-chip active" id="chip-edm" onclick="setGenre('edm')">🪩 4/4 EDM Club</span>
+        <span class="genre-chip" id="chip-trap" onclick="setGenre('trap')">⚡ Trap 808 Bass</span>
+        <span class="genre-chip" id="chip-thrill" onclick="setGenre('thrill')">🦇 Thriller Pulse</span>
+        <span class="genre-chip" id="chip-lofi" onclick="setGenre('lofi')">🧘 Lo-Fi Chill</span>
+      </div>
+
+      <!-- BPM Slider & Tap Tempo -->
+      <div class="slider-box" style="margin-top:10px;">
+        <div class="slider-header">
+          <span>Tempo Speed (BPM)</span>
+          <b id="bpm-display" style="color:var(--accent);">124 BPM</b>
+        </div>
+        <input type="range" id="bpm-slider" min="50" max="200" value="124" oninput="onBpmSlider(this.value)">
+      </div>
+
+      <button class="btn-tap" onclick="onTapTempo()">🥁 TAP WITH EARBUDS BEAT (Auto-Calculates Tempo)</button>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:0.75rem;">
+        <span style="color:var(--subtext);">🔊 Play Beat Click in Earbuds:</span>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="earbuds-click-chk" onchange="toggleClickSound(this.checked)">
+          <span style="color:var(--text); font-weight:700;">Audible Click</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 🎵 IN-BROWSER SONG & BEAT PLAYER (100% Works on HTTP) -->
+    <div class="card player-card">
+      <div class="card-title">🎵 Play Audio / MP3 File (Direct FFT to Earbuds)</div>
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:6px;">
+        Plays any MP3/music file in your earbuds with <b>100% full FFT audio analysis</b> into the Sound Monitor & LED:
+      </div>
+      <div class="player-controls">
+        <label class="file-label" for="audio-file-input">
+          📁 Load Any Music / MP3 File
+          <input type="file" id="audio-file-input" accept="audio/*" style="display:none;" onchange="onAudioFileSelected(event)">
+        </label>
+        <button class="btn-play-song" onclick="playDemoBeatTrack()">▶ Play Demo EDM Beat</button>
+      </div>
+      <audio id="media-audio-player" controls style="width:100%; height:32px; margin-top:8px; display:none;"></audio>
+    </div>
+
+    <!-- 💻 OTHER AUDIO CAPTURE SOURCES -->
+    <div class="card">
+      <div class="card-title">💻 Direct Audio Capture Sources</div>
+      <button class="btn-src" onclick="startLaptopSpotifyCapture()">
+        <span>💻</span>
+        <div>
+          <b>Sync Laptop Spotify Directly (System Audio)</b>
+          <div style="font-size:0.7rem; color:var(--subtext);">Digital audio share from Spotify window or tab</div>
+        </div>
+      </button>
+      <button class="btn-src" onclick="toggleMicrophone()">
+        <span>🎙️</span>
+        <div>
+          <b id="mic-btn-label">Start External Microphone Scanner</b>
+          <div style="font-size:0.7rem; color:var(--subtext);">Listens to ambient room audio with dynamic beat reactivity</div>
+        </div>
+      </button>
+
+      <!-- 🎚️ Dynamic Beat Sensitivity Slider -->
+      <div class="slider-box" style="margin-top:12px;">
+        <div class="slider-header">
+          <span>🎚️ Beat Sensitivity (Low & High Beats)</span>
+          <b id="sens-display" style="color:var(--accent);">3 - Normal Adaptive (Recommended)</b>
+        </div>
+        <input type="range" id="sens-slider" min="1" max="5" value="3" step="1" oninput="onSensitivityChange(this.value)">
+      </div>
+
+      <!-- 💡 Spotify System Audio Helper Banner -->
+      <div style="margin-top:10px; padding:9px 12px; background:rgba(99,102,241,0.12); border-left:3px solid var(--accent); border-radius:6px; font-size:0.71rem; color:#c7d2fe; line-height:1.45;">
+        💡 <b>How to share Spotify audio in Chrome properly:</b><br>
+        1. When Chrome pops up the share dialog, choose <b>Entire Screen</b> (or Spotify tab).<br>
+        2. <b>IMPORTANT:</b> Check the box <b>"Also share system audio"</b> at bottom-left, then click Share!<br>
+        <i>(Tip: If using Bluetooth BLE, you don't even need USB cable or hostel Wi-Fi!)</i>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 2: 🤖 GEMINI AI ==================== -->
+  <div id="tab-gemini" class="tab-content">
+    <div class="card gemini-card">
+      <div class="card-title">🤖 Gemini AI Director (3.5 Flash)</div>
+      <input type="password" id="gemini-key" class="ai-input" value="" placeholder="Gemini API Key (optional)" style="height:30px; font-size:0.72rem; margin-bottom:8px;">
+
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:4px;">1-Click Instant Concept Prompts:</div>
+      <div class="quick-chips">
+        <span class="ai-chip" onclick="setAndAskGemini('Michael Jackson Thriller suspense with dramatic lightning strikes')">🦇 Thriller Suspense</span>
+        <span class="ai-chip" onclick="setAndAskGemini('Peaceful relaxing lo-fi rain and calm meditation')">🧘 Peace & Calm</span>
+        <span class="ai-chip" onclick="setAndAskGemini('Daft Punk retro 80s disco funk party beat')">🪩 Disco Funk</span>
+        <span class="ai-chip" onclick="setAndAskGemini('High-energy Skrillex EDM rave bass drop')">⚡ EDM Drop</span>
+        <span class="ai-chip" onclick="setAndAskGemini('Cyberpunk Tokyo matrix hacker neon glow')">🌆 Cyberpunk</span>
+        <span class="ai-chip" onclick="setAndAskGemini('Warm romantic candle dinner date acoustic')">🕯️ Romantic Glow</span>
+      </div>
+
+      <div class="ai-chat-box">
+        <input type="text" id="ai-prompt-input" class="ai-input" placeholder="Type ANY song, mood, scene or vibe...">
+        <button class="btn-gemini-send" id="btn-ai-send" onclick="askGeminiPrompt()">Ask 🚀</button>
+      </div>
+
+      <div id="ai-bubble" class="ai-bubble">
+        <b id="ai-title" style="color:#c084fc;">Generating...</b>
+        <div id="ai-desc" style="color:var(--subtext); margin-top:3px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 3: 🎭 20 PRESETS ==================== -->
+  <div id="tab-presets" class="tab-content">
+    <div class="card">
+      <div class="card-title">🎭 20 Handcrafted Mood Presets</div>
+      <div class="preset-grid">
+        <button class="preset-btn" onclick="setMode(12)">🦇 Thriller / Suspense</button>
+        <button class="preset-btn" onclick="setMode(13)">🧘 Peace / Zen Ambient</button>
+        <button class="preset-btn" onclick="setMode(11)">🪩 Disco Beat Reactive</button>
+        <button class="preset-btn" onclick="setMode(10)">🎆 Rave Beat Pulse</button>
+        <button class="preset-btn" onclick="setMode(9)">⚡ Lightning Storm</button>
+        <button class="preset-btn" onclick="setMode(18)">🌆 Neon Tokyo Synth</button>
+        <button class="preset-btn" onclick="setMode(20)">👾 Matrix Cyber Rain</button>
+        <button class="preset-btn" onclick="setMode(14)">🌊 Ocean Waves</button>
+        <button class="preset-btn" onclick="setMode(15)">🌋 Volcano Magma</button>
+        <button class="preset-btn" onclick="setMode(16)">🌲 Enchanted Forest</button>
+        <button class="preset-btn" onclick="setMode(17)">🕯️ Candlelight Flicker</button>
+        <button class="preset-btn" onclick="setMode(19)">🧊 Glacier Ice Frost</button>
+        <button class="preset-btn" onclick="setMode(1)">🌌 Aurora Borealis</button>
+        <button class="preset-btn" onclick="setMode(2)">⚡ Cyberpunk Heart</button>
+        <button class="preset-btn" onclick="setMode(3)">🔥 Campfire Ember</button>
+        <button class="preset-btn" onclick="setMode(4)">🌈 Rainbow 360°</button>
+        <button class="preset-btn" onclick="setMode(5)">🚨 Police Strobe</button>
+        <button class="preset-btn" onclick="setMode(6)">💡 Mood White</button>
+        <button class="preset-btn" onclick="setMode(7)">🚥 Traffic Light</button>
+        <button class="preset-btn" onclick="setMode(8)" style="grid-column:span 2; background:linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2)); border-color:var(--accent);">🔄 Auto-Cycle All 20 Moods</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 4: 🛠️ STUDIO & WI-FI ==================== -->
+  <div id="tab-custom" class="tab-content">
+    <!-- Home Wi-Fi Setup Card (Allows Internet + ESP32 at the same time!) -->
+    <div class="card" style="border-color: rgba(16, 185, 129, 0.4); background: linear-gradient(180deg, rgba(6, 78, 59, 0.2), var(--card-bg));">
+      <div class="card-title" style="color:#6ee7b7;">
+        <span>🌐 Connect ESP32 to Home Wi-Fi</span>
+        <span id="wifi-sta-badge" style="font-size:0.68rem; color:#10b981; font-weight:700;">● Dual AP+STA</span>
+      </div>
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:8px;">
+        Connect ESP32 to your Home Wi-Fi / Hotspot so your laptop keeps full internet while controlling lighting:
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <input type="text" id="wifi-ssid-input" class="ai-input" placeholder="Home Wi-Fi Name (SSID)">
+        <input type="password" id="wifi-pass-input" class="ai-input" placeholder="Home Wi-Fi Password">
+        <button class="btn-play" onclick="saveAndConnectHomeWifi()" style="background:#10b981;">Connect ESP32 to Home Wi-Fi</button>
+      </div>
+      <div id="wifi-status-msg" style="font-size:0.72rem; color:var(--subtext); margin-top:6px;"></div>
+    </div>
+
+    <!-- Palette & Custom Picker -->
+    <div class="card">
+      <div class="card-title">🎨 Individual Colors & Picker</div>
+      <div class="palette-grid">
+        <div class="swatch" style="background:#ff0000" onclick="setColor(255,0,0)"></div>
+        <div class="swatch" style="background:#ff5500" onclick="setColor(255,85,0)"></div>
+        <div class="swatch" style="background:#ffaa00" onclick="setColor(255,170,0)"></div>
+        <div class="swatch" style="background:#ffff00" onclick="setColor(255,255,0)"></div>
+        <div class="swatch" style="background:#80ff00" onclick="setColor(128,255,0)"></div>
+        <div class="swatch" style="background:#00ff00" onclick="setColor(0,255,0)"></div>
+        <div class="swatch" style="background:#00ffaa" onclick="setColor(0,255,170)"></div>
+        <div class="swatch" style="background:#00ffff" onclick="setColor(0,255,255)"></div>
+        <div class="swatch" style="background:#0077ff" onclick="setColor(0,119,255)"></div>
+        <div class="swatch" style="background:#0000ff" onclick="setColor(0,0,255)"></div>
+        <div class="swatch" style="background:#8800ff" onclick="setColor(136,0,255)"></div>
+        <div class="swatch" style="background:#ff00aa" onclick="setColor(255,0,170)"></div>
+        <div class="swatch" style="background:#ffeedd" onclick="setColor(255,230,200)"></div>
+        <div class="swatch" style="background:#ffffff" onclick="setColor(255,255,255)"></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="color" id="custom-picker" value="#ff0080" oninput="onHexColor(this.value)" style="border:none; width:44px; height:32px; border-radius:6px; cursor:pointer;">
+        <span style="font-size:0.75rem; color:var(--subtext);">Pick any exact hex color for live output</span>
+      </div>
+    </div>
+
+    <!-- Custom Step Sequence Builder -->
+    <div class="card">
+      <div class="card-title">🛠️ Custom Sequence Builder (Self Function)</div>
+      <div class="form-row">
+        <input type="color" id="step-color" value="#00ffff" style="width:40px; height:32px; border-radius:6px;">
+        <input type="number" id="step-ms" placeholder="Duration (ms)" value="1500" min="50" max="60000" step="100" style="flex:1;">
+        <select id="step-fade" style="flex:1;">
+          <option value="1">Smooth Fade</option>
+          <option value="0">Instant Snap</option>
+        </select>
+      </div>
+      <button class="btn-add" onclick="addCurrentStep()">+ Add Step to Timeline</button>
+      <div class="timeline" id="timeline-list"></div>
+      <div class="seq-actions">
+        <button class="btn-play" onclick="playCustomSequence()">▶ Play Custom Sequence</button>
+        <button class="btn-clear" onclick="clearTimeline()">Clear</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Secure Context Guide -->
+<div class="modal-overlay" id="secure-modal">
+  <div class="modal-box">
+    <h3 style="color:#67e8f9; margin-bottom:8px;">🎧 How to Run Localhost with Spotify</h3>
+    <p style="font-size:0.78rem; color:var(--subtext); line-height:1.5; margin-bottom:12px;">
+      To capture Spotify audio directly with Bluetooth earbuds on your laptop:
+      <br>1. Run <code>python serve.py</code> in your project directory.
+      <br>2. Open <b>http://localhost:8000</b> in your browser.
+      <br>3. Click <b>Sync Laptop Spotify Audio</b>!
+    </p>
+    <button class="btn-play" style="width:100%;" onclick="document.getElementById('secure-modal').style.display='none'">Got It!</button>
+  </div>
+</div>
+
+<script>
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  }
+
+  function updateVirtualLed(r, g, b, alpha=255) {
+    let orb = document.getElementById('virtual-led');
+    let a = alpha / 255.0;
+    orb.style.background = `rgba(${r}, ${g}, ${b}, ${Math.max(0.15, a)})`;
+    orb.style.boxShadow = `0 0 ${Math.round(24 * a)}px rgba(${r}, ${g}, ${b}, ${a * 0.9}), inset 0 0 10px rgba(0,0,0,0.5)`;
+    document.getElementById('active-rgb-val').textContent = `RGB(${r}, ${g}, ${b}) • ${Math.round(a * 100)}%`;
+    let hex = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+    document.getElementById('live-color-chip').style.background = hex;
+    document.getElementById('live-color-hex').textContent = hex;
+  }
+
+  // ====================================================================
+  // 🔵 WEB BLUETOOTH (BLE 5.0) NORDIC UART ENGINE
+  // ====================================================================
+  const BLE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const BLE_RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  const BLE_TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+  let bleDevice = null;
+  let bleServer = null;
+  let bleRxCharacteristic = null;
+  let bleConnected = false;
+
+  async function toggleBluetoothConnect() {
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth requires Google Chrome or Microsoft Edge on localhost or HTTPS.\n\nPlease open http://localhost:8000 in Chrome to connect via Bluetooth!\n\n(Also ensure Bluetooth is turned ON in Windows Settings)");
+      return;
+    }
+    if (bleConnected) {
+      disconnectBluetooth();
+      return;
+    }
+    const btn = document.getElementById('btn-ble-connect');
+    const pill = document.getElementById('ble-status-pill');
+    try {
+      if (btn) btn.innerHTML = '<span>⏳</span> Scanning BLE...';
+      if (pill) pill.textContent = 'Scanning...';
+
+      // acceptAllDevices ensures Windows Chrome lists ESP32-RGB-Studio without strict filter rejection
+      bleDevice = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [BLE_SERVICE_UUID]
+      });
+
+      bleDevice.addEventListener('gattserverdisconnected', onBleDisconnected);
+
+      if (btn) btn.innerHTML = '<span>⏳</span> Connecting...';
+      if (pill) pill.textContent = 'Connecting...';
+
+      bleServer = await bleDevice.gatt.connect();
+
+      const service = await bleServer.getPrimaryService(BLE_SERVICE_UUID);
+      bleRxCharacteristic = await service.getCharacteristic(BLE_RX_UUID);
+
+      bleConnected = true;
+      updateBleUI(true);
+      console.log("🔵 Connected to ESP32 via Bluetooth Low Energy!");
+    } catch(err) {
+      console.warn("BLE connect error:", err);
+      updateBleUI(false);
+      if (err.name === 'NotFoundError') {
+        // User closed or canceled the native browser pairing prompt
+        return;
+      }
+      alert("Bluetooth notice:\n" + err.message + "\n\n1. Make sure Bluetooth is ON in Windows Settings.\n2. Make sure ESP32 is powered on.");
+    }
+  }
+
+  function onBleDisconnected() {
+    bleConnected = false;
+    bleRxCharacteristic = null;
+    updateBleUI(false);
+    console.log("🔵 BLE Disconnected");
+  }
+
+  function disconnectBluetooth() {
+    if (bleDevice && bleDevice.gatt.connected) {
+      bleDevice.gatt.disconnect();
+    }
+    bleConnected = false;
+    bleRxCharacteristic = null;
+    updateBleUI(false);
+  }
+
+  function updateBleUI(connected) {
+    const btn = document.getElementById('btn-ble-connect');
+    const pill = document.getElementById('ble-status-pill');
+    if (connected) {
+      btn.innerHTML = '<span>🔵</span> Disconnect BLE';
+      btn.style.background = 'linear-gradient(135deg, #10b981, #06b6d4)';
+      if (pill) {
+        pill.textContent = '● BLE Connected';
+        pill.style.background = 'rgba(16,185,129,0.15)';
+        pill.style.color = '#34d399';
+        pill.style.borderColor = 'rgba(16,185,129,0.3)';
+      }
+    } else {
+      btn.innerHTML = '<span>🔵</span> Connect Bluetooth';
+      btn.style.background = 'linear-gradient(135deg, #4f46e5, #06b6d4)';
+      if (pill) {
+        pill.textContent = '⚪ BLE Ready';
+        pill.style.background = 'rgba(99,102,241,0.15)';
+        pill.style.color = '#a5b4fc';
+        pill.style.borderColor = 'rgba(99,102,241,0.3)';
+      }
+    }
+  }
+
+  async function sendBleCommand(cmd) {
+    if (!bleConnected || !bleRxCharacteristic) return false;
+    try {
+      const encoder = new TextEncoder();
+      await bleRxCharacteristic.writeValueWithoutResponse(encoder.encode(cmd));
+      return true;
+    } catch(e) {
+      console.warn("BLE write error:", e);
+      return false;
+    }
+  }
+
+  function sendHardwareCommand(cmd, fallbackUrl) {
+    if (bleConnected && bleRxCharacteristic) {
+      sendBleCommand(cmd + '\n');
+    }
+    if (fallbackUrl) {
+      fetch(fallbackUrl).catch(() => {});
+    }
+  }
+
+  function setMode(modeNum) {
+    sendHardwareCommand('!M:' + modeNum, '/api/mode?val=' + modeNum);
+    let titles = {
+      1: "Aurora Borealis", 2: "Cyberpunk Pulse", 3: "Campfire Ember", 4: "Rainbow Wave",
+      5: "Emergency Strobe", 6: "Breathing White", 7: "Traffic Light", 8: "Auto-Cycle 20 Moods",
+      9: "Lightning Storm", 10: "Party Rave Beat", 11: "Dynamic Beat Reactive", 12: "Thriller Suspense",
+      13: "Peace / Zen Ambient", 14: "Ocean Waves", 15: "Volcano Magma", 16: "Enchanted Forest",
+      17: "Candlelight Flicker", 18: "Neon Tokyo Synth", 19: "Glacier Ice Frost", 20: "Matrix Cyber Rain",
+      0: "LED OFF", "-1": "Solid Free Light", "-2": "Custom Sequence"
+    };
+    document.getElementById('active-mode-title').textContent = "Mode: " + (titles[modeNum] || ("Mode " + modeNum));
+    document.getElementById('status-pill').textContent = (modeNum === 0) ? '● OFF' : '● Mode ' + modeNum;
+  }
+
+  // 💡 FREE SOLID LAMP MODE (CONTINUOUS ON)
+  function setLampColor(r, g, b) {
+    stopAllAudio(); // Ensure audio react is completely stopped
+    sendHardwareCommand(`!C:${r},${g},${b}`, `/api/color?r=${r}&g=${g}&b=${b}`);
+    updateVirtualLed(r, g, b, 255);
+    document.getElementById('active-mode-title').textContent = "Mode: Solid Ambient Lamp";
+    document.getElementById('status-pill').textContent = "● Lamp (Solid ON)";
+  }
+
+  function onLampHexColor(hex) {
+    let r = parseInt(hex.slice(1, 3), 16);
+    let g = parseInt(hex.slice(3, 5), 16);
+    let b = parseInt(hex.slice(5, 7), 16);
+    document.getElementById('lamp-hex-display').textContent = hex.toUpperCase();
+    setLampColor(r, g, b);
+  }
+
+  function setColor(r, g, b) {
+    setLampColor(r, g, b);
+  }
+
+  function onHexColor(hex) {
+    onLampHexColor(hex);
+  }
+
+  function onBrightness(val) {
+    document.getElementById('bright-val').textContent = val + '%';
+    sendHardwareCommand('!BR:' + val, '/api/brightness?val=' + val);
+  }
+
+  // ⏱️ Bluetooth Latency Offset Slider (-150ms to +150ms)
+  let syncOffsetMs = 0;
+  function onOffsetChange(val) {
+    syncOffsetMs = parseInt(val);
+    let label = (syncOffsetMs === 0) ? '0 ms (Instant)' : ((syncOffsetMs > 0 ? '+' : '') + syncOffsetMs + ' ms');
+    document.getElementById('offset-val').textContent = label;
+  }
+
+  // ⏱️ Pacing / Minimum Beat Interval & Decay
+  let minBeatInterval = 320;
+  let activeDecay = 480;
+  function setPace(p) {
+    document.querySelectorAll('[id^="pace-"]').forEach(el => el.classList.remove('active'));
+    document.getElementById('pace-' + p).classList.add('active');
+    if (p === 'clean') {
+      minBeatInterval = 320;
+      activeDecay = 480;
+    } else if (p === 'fast') {
+      minBeatInterval = 200;
+      activeDecay = 340;
+    } else if (p === 'chill') {
+      minBeatInterval = 550;
+      activeDecay = 680;
+    }
+  }
+
+  // ====================================================================
+  // 🎨 12 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR
+  // ====================================================================
+  let activeMusicMode = 'cyber';
+  let modeHue = 320;
+  let modeBeatCount = 0;
+  let freeMusicColorRGB = [0, 245, 255]; // Default Free Beat Color: Electric Cyan
+
+  function setMusicMode(m) {
+    activeMusicMode = m;
+    document.querySelectorAll('.music-mode-btn').forEach(b => b.classList.remove('active'));
+    let el = document.getElementById('mode-' + m);
+    if (el) el.classList.add('active');
+  }
+
+  function setFreeMusicColor(hex) {
+    let r = parseInt(hex.slice(1, 3), 16);
+    let g = parseInt(hex.slice(3, 5), 16);
+    let b = parseInt(hex.slice(5, 7), 16);
+    freeMusicColorRGB = [r, g, b];
+    document.getElementById('free-music-picker').value = hex;
+    document.getElementById('free-color-preview-hex').textContent = hex.toUpperCase();
+    setMusicMode('free');
+  }
+
+  function hsvToRgb(h, s, v) {
+    h = (h % 360 + 360) % 360;
+    let c = v * s;
+    let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    let m = v - c;
+    let r1 = 0, g1 = 0, b1 = 0;
+    if (h < 60)       { r1 = c; g1 = x; b1 = 0; }
+    else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+    else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+    else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+    else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+    else              { r1 = c; g1 = 0; b1 = x; }
+    return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
+  }
+
+  function getMusicModeColor(isHeavy, kick, mids, treble) {
+    modeBeatCount++;
+    let m = activeMusicMode;
+
+    if (m === 'cyber') {
+      let h = (modeBeatCount % 8 < 4) ? 325 : 190; // Pink / Cyan
+      return hsvToRgb(h, 1.0, 1.0);
+    } else if (m === 'fire') {
+      let h = (modeBeatCount % 8 < 4) ? 5 : 38;   // Crimson / Amber
+      return hsvToRgb(h, 1.0, 1.0);
+    } else if (m === 'disco') {
+      return hsvToRgb((modeBeatCount * 45) % 360, 1.0, 1.0);
+    } else if (m === 'edm') {
+      return isHeavy ? [255, 255, 255] : [0, 170, 255]; // Strobe White on Kick, Electric Blue
+    } else if (m === 'thrill') {
+      return isHeavy ? [255, 255, 255] : [255, 0, 10]; // Lightning flash on Heavy, Blood Red
+    } else if (m === 'zen') {
+      let h = (modeBeatCount % 6 < 3) ? 275 : 160; // Violet / Seafoam
+      return hsvToRgb(h, 0.75, 1.0);
+    } else if (m === 'pitch') {
+      // Direct pitch mapping: Bass=Red(0), Mids=Green(120), Treble=Blue(240)
+      let pitchHue = (kick * 0 + mids * 1.0 + treble * 2.2) % 360;
+      return hsvToRgb(pitchHue, 1.0, 1.0);
+    } else if (m === 'ocean') {
+      let h = (modeBeatCount % 8 < 4) ? 215 : 175; // Navy / Teal
+      return hsvToRgb(h, 0.95, 1.0);
+    } else if (m === 'acid') {
+      let h = (modeBeatCount % 6 < 3) ? 85 : 305; // Lime Green / Hot Magenta
+      return hsvToRgb(h, 1.0, 1.0);
+    } else if (m === 'volcano') {
+      let h = (modeBeatCount % 6 < 3) ? 0 : 25; // Lava Red / Magma Orange
+      return hsvToRgb(h, 1.0, 1.0);
+    } else if (m === 'gold') {
+      return [255, 195, 80]; // Warm 2700K Audiophile Gold
+    } else if (m === 'ice') {
+      return isHeavy ? [255, 255, 255] : [120, 220, 255]; // Frost White / Crystal Blue
+    } else if (m === 'free') {
+      // 🎨 Free Custom Beat Color: User's chosen exact color!
+      let isWhiteKick = document.getElementById('chk-free-white-kick')?.checked;
+      if (isHeavy && isWhiteKick) {
+        return [255, 255, 255]; // Crisp white flash on heavy drop
+      }
+      return [freeMusicColorRGB[0], freeMusicColorRGB[1], freeMusicColorRGB[2]];
+    }
+    return [0, 245, 255];
+  }
+
+  // ====================================================================
+  // 📊 REAL-TIME SOUND & BEAT MONITOR CANVAS
+  // ====================================================================
+  let canvas = document.getElementById('visualizer-canvas');
+  let canvasCtx = canvas.getContext('2d');
+
+  function resizeCanvas() {
+    if (canvas && canvas.parentElement) {
+      canvas.width = canvas.parentElement.clientWidth || 360;
+      canvas.height = 60;
+    }
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // Idle Wave Animation
+  function drawIdleWave() {
+    if (isListening || isEarbudsSyncActive || isFilePlaying) return;
+    canvasCtx.fillStyle = '#05070c';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    canvasCtx.beginPath();
+    canvasCtx.strokeStyle = 'rgba(99, 102, 241, 0.45)';
+    canvasCtx.lineWidth = 1.5;
+    let mid = canvas.height / 2;
+    let t = Date.now() / 700;
+    for (let x = 0; x < canvas.width; x += 4) {
+      let y = mid + Math.sin(x * 0.04 + t) * 5 * Math.sin(t * 0.4);
+      if (x === 0) canvasCtx.moveTo(x, y);
+      else canvasCtx.lineTo(x, y);
+    }
+    canvasCtx.stroke();
+    
+    canvasCtx.fillStyle = 'rgba(130, 146, 179, 0.5)';
+    canvasCtx.font = '10px sans-serif';
+    canvasCtx.textAlign = 'center';
+    canvasCtx.fillText('Standby • Start Earbuds Beat or Play Audio', canvas.width / 2, mid + 16);
+    
+    requestAnimationFrame(drawIdleWave);
+  }
+  requestAnimationFrame(drawIdleWave);
+
+  // Meter smooth falloff helper
+  let displayBass = 0, displayMids = 0, displayTreb = 0;
+  function updateMeters(k, m, t) {
+    displayBass = Math.max(k, displayBass * 0.85);
+    displayMids = Math.max(m, displayMids * 0.85);
+    displayTreb = Math.max(t, displayTreb * 0.85);
+
+    let pb = Math.round((displayBass / 255) * 100);
+    let pm = Math.round((displayMids / 255) * 100);
+    let pt = Math.round((displayTreb / 255) * 100);
+
+    document.getElementById('meter-bass').style.width = pb + '%';
+    document.getElementById('val-bass').textContent = pb + '%';
+    document.getElementById('meter-mids').style.width = pm + '%';
+    document.getElementById('val-mids').textContent = pm + '%';
+    document.getElementById('meter-treble').style.width = pt + '%';
+    document.getElementById('val-treble').textContent = pt + '%';
+  }
+
+  // ====================================================================
+  // 🛑 STOP ALL AUDIO & RESET DASHBOARD
+  // ====================================================================
+  function stopAllAudio() {
+    isListening = false;
+    isFilePlaying = false;
+    isEarbudsSyncActive = false;
+    
+    if (audioStream) {
+      audioStream.getTracks().forEach(t => t.stop());
+      audioStream = null;
+    }
+    if (earbudsTimer) {
+      clearInterval(earbudsTimer);
+      earbudsTimer = null;
+    }
+    if (demoOscTimer) {
+      clearInterval(demoOscTimer);
+      demoOscTimer = null;
+    }
+
+    let audioPlayer = document.getElementById('media-audio-player');
+    if (audioPlayer) {
+      audioPlayer.pause();
+      audioPlayer.currentTime = 0;
+    }
+
+    let btnSync = document.getElementById('btn-sync-toggle');
+    if (btnSync) {
+      btnSync.classList.remove('active');
+      document.getElementById('sync-text').textContent = 'START EARBUDS BEAT: ON';
+      document.getElementById('sync-icon').textContent = '▶';
+    }
+
+    let micLabel = document.getElementById('mic-btn-label');
+    if (micLabel) micLabel.textContent = 'Start External Microphone Scanner';
+
+    document.getElementById('hud-status').textContent = '⏹️ Stopped (LED Off)';
+    document.getElementById('beat-status-badge').className = 'beat-badge normal';
+    document.getElementById('beat-status-badge').textContent = 'Stopped / Idle';
+    document.getElementById('status-pill').textContent = '● Stopped';
+
+    updateMeters(0, 0, 0);
+    updateVirtualLed(0, 0, 0, 0);
+    sendDynamicBeat(0, 0, 0, 0, 80);
+    requestAnimationFrame(drawIdleWave);
+  }
+
+  // ====================================================================
+  // 🎧 EARBUDS BEAT PULSE ENGINE (Direct Sound Monitor Integration)
+  // ====================================================================
+  let isEarbudsSyncActive = false;
+  let earbudsTimer = null;
+  let currentBPM = 124;
+  let activeGenre = 'edm';
+  let beatCounter = 0;
+  let lastBeatTimestamp = 0;
+  let playEarbudsClick = false;
+  let audioCtx = null;
+
+  function toggleClickSound(checked) {
+    playEarbudsClick = checked;
+    if (checked && (!audioCtx || audioCtx.state === 'suspended')) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+    }
+  }
+
+  function playClickAudio(isHeavy) {
+    if (!playEarbudsClick) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      let osc = audioCtx.createOscillator();
+      let gain = audioCtx.createGain();
+      osc.type = isHeavy ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(isHeavy ? 160 : 750, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.06);
+      gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.06);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.07);
+    } catch(e) {}
+  }
+
+  function setGenre(genre) {
+    activeGenre = genre;
+    document.querySelectorAll('.genre-chips .genre-chip[id^="chip-"]').forEach(c => c.classList.remove('active'));
+    let el = document.getElementById('chip-' + genre);
+    if (el) el.classList.add('active');
+  }
+
+  function toggleEarbudsSync() {
+    isEarbudsSyncActive = !isEarbudsSyncActive;
+    let btn = document.getElementById('btn-sync-toggle');
+    let txt = document.getElementById('sync-text');
+    let icon = document.getElementById('sync-icon');
+
+    if (isEarbudsSyncActive) {
+      btn.classList.add('active');
+      txt.textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
+      icon.textContent = '⏹';
+      document.getElementById('hud-status').textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
+      document.getElementById('status-pill').textContent = '● Beat Sync ON';
+      setMode(11);
+      startEarbudsLoop();
+      requestAnimationFrame(earbudsMonitorLoop);
+    } else {
+      stopAllAudio();
+    }
+  }
+
+  function onBpmSlider(bpm) {
+    currentBPM = parseInt(bpm);
+    document.getElementById('bpm-display').textContent = currentBPM + ' BPM';
+    if (isEarbudsSyncActive) {
+      document.getElementById('sync-text').textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
+      document.getElementById('hud-status').textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
+      startEarbudsLoop();
+    }
+  }
+
+  function startEarbudsLoop() {
+    if (earbudsTimer) clearInterval(earbudsTimer);
+    let interval = Math.round(60000 / currentBPM);
+    sendEarbudsStep();
+    earbudsTimer = setInterval(sendEarbudsStep, interval);
+  }
+
+  function sendEarbudsStep() {
+    beatCounter++;
+    let now = Date.now();
+    lastBeatTimestamp = now;
+
+    let isHeavyKick = (beatCounter % 4 === 1);
+    let isDrop = false;
+    let badge = document.getElementById('beat-status-badge');
+
+    if (activeGenre === 'edm') {
+      if (beatCounter % 16 === 15) isDrop = true;
+    } else if (activeGenre === 'trap') {
+      isHeavyKick = (beatCounter % 8 === 1 || beatCounter % 8 === 5);
+    } else if (activeGenre === 'thrill') {
+      if (beatCounter % 8 === 7) isDrop = true;
+    }
+
+    if (isDrop) {
+      badge.className = 'beat-badge drop';
+      badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+      updateVirtualLed(0, 0, 0, 0);
+      sendDynamicBeat(0, 0, 0, 0, 100);
+      playClickAudio(false);
+      return;
+    }
+
+    let [r, g, b] = getMusicModeColor(isHeavyKick, isHeavyKick ? 200 : 80, 100, 100);
+    let intensity = isHeavyKick ? 255 : 220;
+    let decay = isHeavyKick ? activeDecay : Math.round(activeDecay * 0.8);
+
+    if (isHeavyKick) {
+      badge.className = 'beat-badge peak';
+      badge.textContent = `🔥 HEAVY BEAT (Kick Peak 255)`;
+      playClickAudio(true);
+    } else {
+      badge.className = 'beat-badge normal';
+      badge.textContent = `✨ GROOVE BEAT (Glow ${intensity})`;
+      playClickAudio(false);
+    }
+
+    updateVirtualLed(r, g, b, intensity);
+    sendDynamicBeat(r, g, b, intensity, decay);
+  }
+
+  function earbudsMonitorLoop() {
+    if (!isEarbudsSyncActive) return;
+
+    let now = Date.now();
+    let beatPeriod = 60000 / currentBPM;
+    let elapsed = now - lastBeatTimestamp;
+    let phase = Math.min(1.0, elapsed / beatPeriod);
+    let decay = Math.max(0, 1.0 - phase * 1.3);
+
+    let kickEnergy = Math.round(255 * Math.exp(-phase * 3.5));
+    let midsEnergy = Math.round(150 * Math.sin(phase * Math.PI));
+    let trebEnergy = Math.round(180 * Math.max(0, Math.sin(phase * Math.PI * 4)));
+
+    updateMeters(kickEnergy, midsEnergy, trebEnergy);
+
+    // Draw Dynamic Spectrum Bars
+    canvasCtx.fillStyle = '#05070c';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    let numBars = 32;
+    let barWidth = (canvas.width / numBars) - 2;
+
+    for (let i = 0; i < numBars; i++) {
+      let bandFrac = i / numBars;
+      let barVal = 0;
+      if (bandFrac < 0.25) barVal = kickEnergy * (1 - bandFrac * 2);
+      else if (bandFrac < 0.65) barVal = midsEnergy * (0.8 + 0.4 * Math.sin(i + now/180));
+      else barVal = trebEnergy * (0.6 + 0.5 * Math.cos(i + now/120));
+
+      let barH = (barVal / 255) * canvas.height;
+      let hue = modeHue + (i * 2);
+      canvasCtx.fillStyle = `hsl(${hue}, 100%, ${48 + decay * 22}%)`;
+      canvasCtx.fillRect(i * (barWidth + 2), canvas.height - barH, barWidth, barH);
+    }
+
+    requestAnimationFrame(earbudsMonitorLoop);
+  }
+
+  let tapHistory = [];
+  function onTapTempo() {
+    let now = Date.now();
+    if (tapHistory.length > 0 && now - tapHistory[tapHistory.length - 1] > 2500) tapHistory = [];
+    tapHistory.push(now);
+
+    let [r, g, b] = getMusicModeColor(true, 220, 100, 100);
+    updateVirtualLed(r, g, b, 255);
+    sendDynamicBeat(r, g, b, 255, 450);
+    playClickAudio(true);
+
+    if (tapHistory.length > 1) {
+      let intervals = [];
+      for (let i = 1; i < tapHistory.length; i++) intervals.push(tapHistory[i] - tapHistory[i - 1]);
+      let avg = intervals.reduce((a, b) => a + b) / intervals.length;
+      let bpm = Math.min(200, Math.max(50, Math.round(60000 / avg)));
+      currentBPM = bpm;
+      document.getElementById('bpm-slider').value = bpm;
+      document.getElementById('bpm-display').textContent = bpm + ' BPM';
+      if (!isEarbudsSyncActive) toggleEarbudsSync();
+      else startEarbudsLoop();
+    }
+  }
+
+  // ====================================================================
+  // 🎵 IN-BROWSER AUDIO PLAYER & FULL FFT WEB AUDIO PIPELINE
+  // ====================================================================
+  let analyser = null, audioStream = null;
+  let isListening = false, isFilePlaying = false;
+  let mediaElementSource = null;
+
+  function initWebAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!analyser) {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.05; // ULTRA LOW LATENCY (0.05 for near-instant transient response!)
+    }
+  }
+
+  function onAudioFileSelected(evt) {
+    let file = evt.target.files[0];
+    if (!file) return;
+
+    initWebAudio();
+    let player = document.getElementById('media-audio-player');
+    player.style.display = 'block';
+    player.src = URL.createObjectURL(file);
+    player.play();
+
+    if (!mediaElementSource) {
+      mediaElementSource = audioCtx.createMediaElementSource(player);
+      mediaElementSource.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+
+    isFilePlaying = true;
+    isListening = true;
+    document.getElementById('hud-status').textContent = '🎵 Playing: ' + file.name.substring(0, 24);
+    setMode(11);
+    processDynamicAudioLoop();
+  }
+
+  // Built-in Demo EDM Synth Track
+  let demoOscTimer = null;
+  function playDemoBeatTrack() {
+    initWebAudio();
+    if (demoOscTimer) {
+      stopAllAudio();
+      return;
+    }
+
+    isListening = true;
+    document.getElementById('hud-status').textContent = '▶ Demo EDM Beat Playing in Earbuds';
+    setMode(11);
+    let step = 0;
+
+    demoOscTimer = setInterval(() => {
+      step++;
+      let isKick = (step % 4 === 1);
+      let osc = audioCtx.createOscillator();
+      let gain = audioCtx.createGain();
+      osc.type = isKick ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(isKick ? 130 : 380, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + (isKick ? 0.18 : 0.08));
+      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (isKick ? 0.18 : 0.08));
+      
+      osc.connect(gain);
+      gain.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    }, 240);
+
+    processDynamicAudioLoop();
+  }
+
+  // ====================================================================
+  // 💻 SYSTEM SPOTIFY & LIVE MICROPHONE CAPTURE
+  // ====================================================================
+  async function startLaptopSpotifyCapture() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      document.getElementById('secure-modal').style.display = 'flex';
+      return;
+    }
+    try {
+      audioStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+      let audioTracks = audioStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        alert("⚠️ Please check 'Share audio' or 'Also share tab audio' in the prompt window!");
+        audioStream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      setupStreamAudio(audioStream, "💻 Laptop Spotify Audio Active");
+    } catch(err) {
+      if (err.name !== 'NotAllowedError') alert("Audio Capture Error: " + err.message);
+    }
+  }
+
+  async function toggleMicrophone() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      document.getElementById('secure-modal').style.display = 'flex';
+      return;
+    }
+    if (isListening) {
+      stopAllAudio();
+      return;
+    }
+    try {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setupStreamAudio(audioStream, "🎙️ Live Microphone Active");
+      document.getElementById('mic-btn-label').textContent = 'Stop Microphone Scanner';
+    } catch(err) {
+      alert("Microphone error: " + err.message);
+    }
+  }
+
+  function setupStreamAudio(stream, label) {
+    initWebAudio();
+    let src = audioCtx.createMediaStreamSource(stream);
+    src.connect(analyser);
+    isListening = true;
+    document.getElementById('hud-status').textContent = label;
+    setMode(11);
+    processDynamicAudioLoop();
+  }
+
+  // ====================================================================
+  // 🎧 REAL FFT DSP PROCESSOR (GRADED VELOCITY, DYNAMIC AGC, ZERO-DROP QUEUE)
+  // ====================================================================
+  let silenceFrames = 0;
+  let isCurrentlySilent = false;
+  let maxKickObserved = 60;
+  let maxMidObserved = 50;
+  let avgKickEnvelope = 25;
+  let avgMidEnvelope = 20;
+  let lastKickEnergy = 0;
+  let lastMidEnergy = 0;
+  let recentEnergy = [];
+  let beatSensitivityLevel = 3; // 1 to 5 (default 3 - Normal Adaptive)
+
+  function onSensitivityChange(val) {
+    beatSensitivityLevel = parseInt(val);
+    const labels = {
+      1: "1 - Very Subtle (Only Peak Drops)",
+      2: "2 - Gentle (Smooth Groove)",
+      3: "3 - Normal Adaptive (Recommended)",
+      4: "4 - Dynamic Punch (Very Reactive)",
+      5: "5 - Maximum Sensitivity (Ultra-Fast)"
+    };
+    document.getElementById('sens-display').textContent = labels[beatSensitivityLevel] || (val + '/5');
+  }
+
+  function processDynamicAudioLoop() {
+    if (!isListening) return;
+
+    let bufLen = analyser.frequencyBinCount;
+    let dataArray = new Uint8Array(bufLen);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Multi-Band Extraction:
+    // Sub-bass & Kicks (Bins 1-3: ~30-180 Hz)
+    let kick = 0; for (let i = 1; i <= 3; i++) kick += dataArray[i]; kick /= 3;
+    // Lower & Mid Range - Snares, Vocals, Rhythm Synths (Bins 5-16: ~300-1100 Hz)
+    let mids = 0; for (let i = 5; i <= 16; i++) mids += dataArray[i]; mids /= 12;
+    // Highs & Treble - Cymbals, Hi-Hats, Sparkles (Bins 18-50: ~1200-3800 Hz)
+    let treble = 0; for (let i = 18; i <= 50; i++) treble += dataArray[i]; treble /= 33;
+
+    let totalEnergy = (kick * 1.5 + mids * 1.1 + treble * 0.8) / 3.4;
+
+    // Dynamic Automatic Gain Control (AGC) - Adapts to low or high Spotify volume
+    maxKickObserved = Math.max(kick, maxKickObserved * 0.996);
+    if (maxKickObserved < 25) maxKickObserved = 25;
+
+    maxMidObserved = Math.max(mids, maxMidObserved * 0.996);
+    if (maxMidObserved < 20) maxMidObserved = 20;
+
+    avgKickEnvelope = avgKickEnvelope * 0.91 + kick * 0.09;
+    avgMidEnvelope = avgMidEnvelope * 0.91 + mids * 0.09;
+
+    let now = Date.now();
+    let badge = document.getElementById('beat-status-badge');
+
+    // 🛑 1. TRUE DIGITAL SILENCE / SPOTIFY PAUSE DETECTION
+    // Requires totalEnergy < 3.5 continuously for 25 frames (~400ms of true digital silence)
+    // Never falsely triggers during quiet musical beats!
+    if (totalEnergy < 3.5) {
+      silenceFrames++;
+      if (silenceFrames >= 25) {
+        updateMeters(0, 0, 0);
+        drawPausedSpectrum(canvasCtx, canvas);
+        badge.className = 'beat-badge drop';
+        badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+        updateVirtualLed(0, 0, 0, 0);
+
+        if (!isCurrentlySilent) {
+          isCurrentlySilent = true;
+          dispatchDynamicBeat(0, 0, 0, 0, 60);
+        }
+
+        requestAnimationFrame(processDynamicAudioLoop);
+        return;
+      }
+    } else {
+      silenceFrames = 0;
+      isCurrentlySilent = false;
+    }
+
+    // 2. DRAW ACTIVE SPECTRUM
+    canvasCtx.fillStyle = '#05070c';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    let barWidth = (canvas.width / 80) * 1.8;
+    let x = 0;
+    for (let i = 0; i < 80; i++) {
+      let barHeight = (dataArray[i] / 255) * canvas.height;
+      canvasCtx.fillStyle = `hsl(${modeHue + (i * 2.5)}, 100%, 55%)`;
+      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+      x += barWidth + 1.2;
+    }
+
+    updateMeters(kick, mids, treble);
+
+    recentEnergy.push(totalEnergy);
+    if (recentEnergy.length > 25) recentEnergy.shift();
+    let avgRecent = recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length;
+
+    // 3. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
+    let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 28);
+    if (isDrop) {
+      badge.className = 'beat-badge drop';
+      badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+      updateVirtualLed(0, 0, 0, 0);
+      dispatchDynamicBeat(0, 0, 0, 0, 70);
+    }
+    // 4. MULTI-LEVEL DYNAMIC BEAT DETECTION (Low Beats, Snares, and Heavy Kicks)
+    else {
+      let kickOnset = kick - lastKickEnergy;
+      lastKickEnergy = kick;
+
+      let midOnset = mids - lastMidEnergy;
+      lastMidEnergy = mids;
+
+      // Sensitivity Multipliers: Level 1..5
+      let sensFactors = [0.7, 0.7, 0.85, 1.0, 1.25, 1.55];
+      let sens = sensFactors[beatSensitivityLevel] || 1.0;
+
+      let normKick = Math.min(1.0, kick / maxKickObserved);
+      let normMid = Math.min(1.0, mids / maxMidObserved);
+
+      // Detection tests:
+      let isHeavyKick = (kickOnset > (8 / sens) && kick > (avgKickEnvelope * 1.2 / sens)) || (normKick > 0.82);
+      let isSnareClap = !isHeavyKick && ((midOnset > (6 / sens) && mids > (avgMidEnvelope * 1.15 / sens)) || (normMid > 0.80));
+      let isLowBeat   = !isHeavyKick && !isSnareClap && ((kickOnset > (3 / sens) && kick > (avgKickEnvelope * 1.06 / sens)) || (normKick > 0.38 && (now - lastBeatTimestamp > 260)));
+
+      let beatHit = isHeavyKick || isSnareClap || isLowBeat;
+      let minGap = isHeavyKick ? 120 : (isSnareClap ? 90 : 75);
+
+      if (beatHit && (now - lastBeatTimestamp > minGap)) {
+        lastBeatTimestamp = now;
+
+        let intensity = 0;
+        let decayMs = 0;
+        let [r, g, b] = [255, 255, 255];
+
+        if (isHeavyKick) {
+          // 🔥 HEAVY BEAT: Bright punch (200 to 255 brightness)
+          intensity = Math.round(200 + normKick * 55);
+          decayMs = activeDecay;
+          [r, g, b] = getMusicModeColor(true, kick, mids, treble);
+          badge.className = 'beat-badge peak';
+          badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
+        } else if (isSnareClap) {
+          // 🥁 SNARE / RHYTHM: Crisp, snappy strike (125 to 185 brightness)
+          intensity = Math.round(125 + normMid * 60);
+          decayMs = Math.round(activeDecay * 0.75);
+          [r, g, b] = getMusicModeColor(false, kick, mids, treble);
+          badge.className = 'beat-badge normal';
+          badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
+        } else {
+          // 🫧 LOW / SOFT BEAT: Subtle mellow glow (50 to 110 brightness)
+          intensity = Math.round(50 + normKick * 60);
+          decayMs = Math.round(activeDecay * 0.55);
+          [r, g, b] = getMusicModeColor(false, kick, mids, treble);
+          badge.className = 'beat-badge normal';
+          badge.textContent = `🫧 SOFT BEAT (Glow ${intensity})`;
+        }
+
+        updateVirtualLed(r, g, b, intensity);
+
+        if (syncOffsetMs > 0) {
+          setTimeout(() => { dispatchDynamicBeat(r, g, b, intensity, decayMs); }, syncOffsetMs);
+        } else {
+          dispatchDynamicBeat(r, g, b, intensity, decayMs);
+        }
+      }
+    }
+
+    requestAnimationFrame(processDynamicAudioLoop);
+  }
+
+  function drawPausedSpectrum(ctx, c) {
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.45)';
+    ctx.lineWidth = 1.5;
+    let mid = c.height / 2;
+    ctx.beginPath();
+    ctx.moveTo(0, mid);
+    ctx.lineTo(c.width, mid);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(248, 113, 113, 0.8)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⏸️ SPOTIFY PAUSED • No Audio (LED Off)', c.width / 2, mid + 16);
+  }
+
+  let lastDynamicBeatSent = 0;
+  let pendingDynamicBeat = null;
+  let pendingBeatTimeout = null;
+
+  function dispatchDynamicBeat(r, g, b, v, d) {
+    // 1. If Bluetooth LE is connected: Instant sub-2ms direct characteristic write!
+    if (bleConnected && bleRxCharacteristic) {
+      sendBleCommand(`!B:${r},${g},${b},${v},${d}
+`);
+      return;
+    }
+
+    // 2. Over HTTP / USB Serial Bridge: Rate-limited to 38ms with zero-drop queue
+    let now = performance.now();
+    if (now - lastDynamicBeatSent < 38) {
+      if (!pendingDynamicBeat || v === 0 || v > pendingDynamicBeat.v) {
+        pendingDynamicBeat = { r, g, b, v, d };
+        if (!pendingBeatTimeout) {
+          let delayMs = Math.max(1, Math.round(38 - (now - lastDynamicBeatSent)));
+          pendingBeatTimeout = setTimeout(() => {
+            pendingBeatTimeout = null;
+            if (pendingDynamicBeat) {
+              let p = pendingDynamicBeat;
+              pendingDynamicBeat = null;
+              dispatchDynamicBeat(p.r, p.g, p.b, p.v, p.d);
+            }
+          }, delayMs);
+        }
+      }
+      return;
+    }
+
+    lastDynamicBeatSent = now;
+    fetch(`/api/beat?r=${r}&g=${g}&b=${b}&v=${v}&d=${d}`, { keepalive: true }).catch(() => {});
+  }
+
+  function sendDynamicBeat(r, g, b, v, d) {
+    dispatchDynamicBeat(r, g, b, v, d);
+  }
+
+  // ====================================================================
+  // 🤖 GEMINI AI DIRECTOR
+  // ====================================================================
+  function setAndAskGemini(promptText) {
+    document.getElementById('ai-prompt-input').value = promptText;
+    askGeminiPrompt();
+  }
+
+  async function askGeminiPrompt() {
+    let key = document.getElementById('gemini-key').value.trim();
+    let prompt = document.getElementById('ai-prompt-input').value.trim();
+    let bubble = document.getElementById('ai-bubble');
+    let titleEl = document.getElementById('ai-title');
+    let descEl = document.getElementById('ai-desc');
+    let btn = document.getElementById('btn-ai-send');
+
+    if (!prompt) {
+      alert('Please type any song, mood, scene or vibe in the box or click a quick prompt!');
+      return;
+    }
+
+    bubble.style.display = 'block';
+    titleEl.textContent = '✨ Gemini AI is analyzing & choreographing...';
+    descEl.textContent = 'Composing unique lighting recipe with Gemini 3.5 Flash...';
+    btn.disabled = true;
+
+    let instruction = "You are a professional lighting designer for an ESP32 RGB LED. The user wants lighting for this concept, scene, song, or atmosphere: '" + prompt + "'.\nCreate a synchronized RGB lighting sequence (between 4 and 10 steps) matching the exact tempo, genre, rhythm, and color atmosphere.\n\nRespond ONLY with valid JSON in this exact structure without markdown backticks:\n{\n  \"moodTitle\": \"Short creative title\",\n  \"bpm\": 120,\n  \"vibe\": \"One sentence describing the lighting concept\",\n  \"steps\": [\n    {\"r\": 255, \"g\": 0, \"b\": 50, \"ms\": 400, \"fade\": 1},\n    {\"r\": 0, \"g\": 10, \"b\": 80, \"ms\": 500, \"fade\": 0}\n  ]\n}";
+
+    try {
+      let res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' + key, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: instruction }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
+
+      if (!res.ok) throw new Error("API returned status " + res.status);
+      let data = await res.json();
+      let rawText = data.candidates[0].content.parts[0].text;
+      let cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      let recipe = JSON.parse(cleanJson);
+
+      titleEl.textContent = '🎬 ' + recipe.moodTitle + ' (' + (recipe.bpm || 120) + ' BPM)';
+      descEl.textContent = recipe.vibe;
+
+      timeline = recipe.steps.map(s => ({
+        r: s.r, g: s.g, b: s.b, ms: s.ms || 500, fade: (s.fade !== undefined ? s.fade : 1)
+      }));
+      renderTimeline();
+
+      if (recipe.bpm) {
+        currentBPM = recipe.bpm;
+        document.getElementById('bpm-slider').value = currentBPM;
+        document.getElementById('bpm-display').textContent = currentBPM + ' BPM';
+      }
+
+      playCustomSequence();
+      document.getElementById('active-mode-title').textContent = 'AI: ' + recipe.moodTitle;
+    } catch(err) {
+      titleEl.textContent = '⚠️ Generation Note';
+      descEl.textContent = err.message + '. (If offline, use the 20 built-in presets or Studio Builder!)';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ====================================================================
+  // 🛠️ CUSTOM SEQUENCE BUILDER
+  // ====================================================================
+  let timeline = [
+    { r: 255, g: 0, b: 120, ms: 800, fade: 1 },
+    { r: 0, g: 240, b: 255, ms: 800, fade: 1 },
+    { r: 160, g: 0, b: 255, ms: 600, fade: 0 }
+  ];
+
+  function renderTimeline() {
+    let list = document.getElementById('timeline-list');
+    list.innerHTML = '';
+    timeline.forEach((step, idx) => {
+      let div = document.createElement('div');
+      div.className = 'timeline-item';
+      div.style.background = `rgb(${step.r},${step.g},${step.b})`;
+      div.innerHTML = `<span>${step.ms}ms</span><span style="font-size:9px;">${step.fade ? 'Fade' : 'Snap'}</span><div class="del" onclick="deleteStep(${idx})">×</div>`;
+      list.appendChild(div);
+    });
+  }
+
+  function addCurrentStep() {
+    let hex = document.getElementById('step-color').value;
+    let ms = parseInt(document.getElementById('step-ms').value) || 1000;
+    let fade = parseInt(document.getElementById('step-fade').value);
+    let r = parseInt(hex.slice(1, 3), 16);
+    let g = parseInt(hex.slice(3, 5), 16);
+    let b = parseInt(hex.slice(5, 7), 16);
+    timeline.push({ r, g, b, ms, fade });
+    renderTimeline();
+  }
+
+  function deleteStep(idx) {
+    timeline.splice(idx, 1);
+    renderTimeline();
+  }
+
+  function clearTimeline() {
+    timeline = [];
+    renderTimeline();
+  }
+
+  function playCustomSequence() {
+    if (timeline.length === 0) {
+      alert('Add at least 1 step to the timeline!');
+      return;
+    }
+    let parts = timeline.map(s => `${s.r},${s.g},${s.b},${s.ms},${s.fade}`);
+    sendHardwareCommand('!SEQ:' + parts.join(';'), '/api/custom/set?steps=' + encodeURIComponent(parts.join(';')));
+    setMode(-2);
+  }
+
+  // ====================================================================
+  // 🌐 HOME WI-FI SETUP CALLS
+  // ====================================================================
+  function saveAndConnectHomeWifi() {
+    let ssid = document.getElementById('wifi-ssid-input').value.trim();
+    let pass = document.getElementById('wifi-pass-input').value.trim();
+    let msgEl = document.getElementById('wifi-status-msg');
+
+    if (!ssid) {
+      alert('Please enter your Home Wi-Fi SSID / Name!');
+      return;
+    }
+
+    msgEl.innerHTML = '<b style="color:#f59e0b;">⏳ Saving and connecting ESP32 to ' + ssid + '...</b>';
+    fetch(`/api/wifi?ssid=${encodeURIComponent(ssid)}&pass=${encodeURIComponent(pass)}`)
+      .then(res => res.text())
+      .then(txt => {
+        msgEl.innerHTML = '<b style="color:#10b981;">✅ Saved! ESP32 is connecting to ' + ssid + '. Check serial or mDNS at http://esp32-rgb.local</b>';
+      })
+      .catch(err => {
+        msgEl.innerHTML = '<b style="color:#ef4444;">Error: ' + err.message + '</b>';
+      });
+  }
+
+  renderTimeline();
+</script>
+</body>
+</html>
+)rawliteral";
+
+// ====================================================================
+// 🌐 WEB SERVER API HANDLERS
+// ====================================================================
+void handleRoot() {
+    server.send(200, "text/html", INDEX_HTML);
+}
+
+void handleSetMode() {
+    if (server.hasArg("val")) {
+        int val = server.arg("val").toInt();
+        if (val == 8) {
+            autoCycle = true;
+            currentMode = 1;
+            lastAutoSwitch = millis();
+        } else {
+            autoCycle = false;
+            currentMode = val;
+            if (val == 0) setRGB(0, 0, 0);
+        }
+        server.send(200, "text/plain", "OK");
+        Serial.printf("\r\n[Web] Switched to Mode %d\n\rEnter command >> ", currentMode);
+    } else {
+        server.send(400, "text/plain", "Missing val");
+    }
+}
+
+void handleSetColor() {
+    if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
+        staticR = server.arg("r").toInt();
+        staticG = server.arg("g").toInt();
+        staticB = server.arg("b").toInt();
+        currentMode = -1; // Solid Free Light / Lamp mode!
+        autoCycle = false;
+        setRGB(staticR, staticG, staticB);
+        server.send(200, "text/plain", "OK");
+        Serial.printf("\r\n[Web] Free Lamp Color: R=%d, G=%d, B=%d\n\rEnter command >> ", staticR, staticG, staticB);
+    } else {
+        server.send(400, "text/plain", "Missing RGB");
+    }
+}
+
+void handleSetBrightness() {
+    if (server.hasArg("val")) {
+        int val = server.arg("val").toInt();
+        if (val < 0) val = 0;
+        if (val > 100) val = 100;
+        masterBrightness = val;
+        server.send(200, "text/plain", "OK");
+        Serial.printf("\r\n[Web] Brightness: %d%%\n\rEnter command >> ", masterBrightness);
+    } else {
+        server.send(400, "text/plain", "Missing val");
+    }
+}
+
+// Low-latency Dynamic Beat with Intensity (v) and Agile Decay (d)
+void handleBeat() {
+    if (server.hasArg("r")) beatR = server.arg("r").toInt();
+    if (server.hasArg("g")) beatG = server.arg("g").toInt();
+    if (server.hasArg("b")) beatB = server.arg("b").toInt();
+    if (server.hasArg("v")) beatIntensity = server.arg("v").toInt(); else beatIntensity = 255;
+    if (server.hasArg("d")) beatDecayMs = server.arg("d").toInt(); else beatDecayMs = 480;
+
+    lastBeatTime = millis();
+    currentMode = 11;
+    autoCycle = false;
+    server.send(200, "text/plain", "OK");
+}
+
+void handleSetCustomSequence() {
+    if (server.hasArg("steps")) {
+        String data = server.arg("steps");
+        customStepCount = 0;
+
+        int start = 0;
+        while (start < data.length() && customStepCount < MAX_CUSTOM_STEPS) {
+            int semi = data.indexOf(';', start);
+            String item = (semi == -1) ? data.substring(start) : data.substring(start, semi);
+
+            int c1 = item.indexOf(',');
+            int c2 = item.indexOf(',', c1 + 1);
+            int c3 = item.indexOf(',', c2 + 1);
+            int c4 = item.indexOf(',', c3 + 1);
+
+            if (c1 != -1 && c2 != -1 && c3 != -1 && c4 != -1) {
+                customSteps[customStepCount].r = item.substring(0, c1).toInt();
+                customSteps[customStepCount].g = item.substring(c1 + 1, c2).toInt();
+                customSteps[customStepCount].b = item.substring(c2 + 1, c3).toInt();
+                customSteps[customStepCount].durationMs = item.substring(c3 + 1, c4).toInt();
+                customSteps[customStepCount].fade = (item.substring(c4 + 1).toInt() == 1);
+                customStepCount++;
+            }
+
+            if (semi == -1) break;
+            start = semi + 1;
+        }
+
+        currentCustomIndex = 0;
+        stepStartTime = millis();
+        currentMode = -2;
+        autoCycle = false;
+
+        server.send(200, "text/plain", "OK");
+        Serial.printf("\r\n[Web] Loaded sequence with %d steps!\n\rEnter command >> ", customStepCount);
+    } else {
+        server.send(400, "text/plain", "Missing steps");
+    }
+}
+
+// Wi-Fi Configuration API Handlers
+void handleSetWiFi() {
+    if (server.hasArg("ssid")) {
+        String ssid = server.arg("ssid");
+        String pass = server.hasArg("pass") ? server.arg("pass") : "";
+        preferences.begin("wifi_cfg", false);
+        preferences.putString("ssid", ssid);
+        preferences.putString("pass", pass);
+        preferences.end();
+        server.send(200, "text/plain", "Connecting to Home Wi-Fi...");
+        WiFi.begin(ssid.c_str(), pass.c_str());
+        Serial.printf("\r\n[Wi-Fi] Saved & Connecting to Home Wi-Fi: %s ...\n\rEnter command >> ", ssid.c_str());
+    } else {
+        server.send(400, "text/plain", "Missing ssid");
+    }
+}
+
+// ====================================================================
+// ⚡ HIGH-SPEED USB SERIAL PROTOCOL HANDLER
+// ====================================================================
+void processSerialProtocol(String cmd) {
+    // !B:r,g,b,v,d
+    if (cmd.startsWith("B:")) {
+        int c1 = cmd.indexOf(',', 2);
+        int c2 = cmd.indexOf(',', c1 + 1);
+        int c3 = cmd.indexOf(',', c2 + 1);
+        int c4 = cmd.indexOf(',', c3 + 1);
+        if (c1 != -1 && c2 != -1 && c3 != -1 && c4 != -1) {
+            beatR = cmd.substring(2, c1).toInt();
+            beatG = cmd.substring(c1 + 1, c2).toInt();
+            beatB = cmd.substring(c2 + 1, c3).toInt();
+            beatIntensity = cmd.substring(c3 + 1, c4).toInt();
+            beatDecayMs = cmd.substring(c4 + 1).toInt();
+            lastBeatTime = millis();
+            currentMode = 11;
+            autoCycle = false;
+        }
+    }
+    // !C:r,g,b
+    else if (cmd.startsWith("C:")) {
+        int c1 = cmd.indexOf(',', 2);
+        int c2 = cmd.indexOf(',', c1 + 1);
+        if (c1 != -1 && c2 != -1) {
+            staticR = cmd.substring(2, c1).toInt();
+            staticG = cmd.substring(c1 + 1, c2).toInt();
+            staticB = cmd.substring(c2 + 1).toInt();
+            currentMode = -1;
+            autoCycle = false;
+            setRGB(staticR, staticG, staticB);
+        }
+    }
+    // !M:val
+    else if (cmd.startsWith("M:")) {
+        int val = cmd.substring(2).toInt();
+        if (val == 8) {
+            autoCycle = true;
+            currentMode = 1;
+            lastAutoSwitch = millis();
+        } else {
+            autoCycle = false;
+            currentMode = val;
+            if (val == 0) setRGB(0, 0, 0);
+        }
+    }
+    // !BR:val
+    else if (cmd.startsWith("BR:")) {
+        int val = cmd.substring(3).toInt();
+        if (val >= 0 && val <= 100) masterBrightness = val;
+    }
+    // !SEQ:steps
+    else if (cmd.startsWith("SEQ:")) {
+        String data = cmd.substring(4);
+        customStepCount = 0;
+        int start = 0;
+        while (start < data.length() && customStepCount < MAX_CUSTOM_STEPS) {
+            int semi = data.indexOf(';', start);
+            String item = (semi == -1) ? data.substring(start) : data.substring(start, semi);
+            int c1 = item.indexOf(',');
+            int c2 = item.indexOf(',', c1 + 1);
+            int c3 = item.indexOf(',', c2 + 1);
+            int c4 = item.indexOf(',', c3 + 1);
+            if (c1 != -1 && c2 != -1 && c3 != -1 && c4 != -1) {
+                customSteps[customStepCount].r = item.substring(0, c1).toInt();
+                customSteps[customStepCount].g = item.substring(c1 + 1, c2).toInt();
+                customSteps[customStepCount].b = item.substring(c2 + 1, c3).toInt();
+                customSteps[customStepCount].durationMs = item.substring(c3 + 1, c4).toInt();
+                customSteps[customStepCount].fade = (item.substring(c4 + 1).toInt() == 1);
+                customStepCount++;
+            }
+            if (semi == -1) break;
+            start = semi + 1;
+        }
+        currentCustomIndex = 0;
+        stepStartTime = millis();
+        currentMode = -2;
+        autoCycle = false;
+    }
+}
+
+// ====================================================================
+// 💬 TERMINAL INTERACTION
+// ====================================================================
+void printMenu() {
+    Serial.println("\n\r==============================================");
+    Serial.println("\r   ✨ ESP32-S3 AI RGB PRO STUDIO (20 MOODS)   ");
+    Serial.println("\r==============================================");
+    Serial.printf("\r AP URL: http://%s\n\r", WiFi.softAPIP().toString().c_str());
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("\r Home Network URL: http://%s (or http://esp32-rgb.local)\n\r", WiFi.localIP().toString().c_str());
+    }
+    Serial.printf("\r Active Pin: GPIO %d | Brightness: %d%%\n\r", rgbPin, masterBrightness);
+    Serial.println("\r----------------------------------------------");
+    Serial.println("\r [1] 🌌 Aurora Borealis      [11] 🪩 Disco Beat Reactive");
+    Serial.println("\r [2] ⚡ Cyberpunk Pulse      [12] 🦇 Thriller Suspense");
+    Serial.println("\r [3] 🔥 Campfire Ember       [13] 🧘 Peace / Zen Ambient");
+    Serial.println("\r [4] 🌈 Rainbow 360 Wave     [14] 🌊 Ocean Waves");
+    Serial.println("\r [5] 🚨 Emergency Strobe     [15] 🌋 Volcano Magma");
+    Serial.println("\r [6] 💡 Breathing White      [16] 🌲 Enchanted Forest");
+    Serial.println("\r [7] 🚥 Traffic Light        [17] 🕯️ Candlelight Flicker");
+    Serial.println("\r [8] 🔄 Auto-Cycle 20 Moods  [18] 🌆 Neon Tokyo Synth");
+    Serial.println("\r [9] ⚡ Lightning Storm      [19] 🧊 Glacier Ice Frost");
+    Serial.println("\r [10] 🎆 Party Rave Beat     [20] 👾 Matrix Cyber Rain");
+    Serial.println("\r [0] 🌑 Turn LED OFF         [+] / [-] Brightness");
+    Serial.println("\r [pin <num>] Change GPIO Pin (e.g. 'pin 48')");
+    Serial.println("\r [help] Show this menu");
+    Serial.println("\r==============================================");
+    Serial.print("\rEnter command >> ");
+}
+
+void processTerminalInput(String input) {
+    input.trim();
+    if (input.length() == 0) return;
+
+    int num = input.toInt();
+    if (num >= 0 && num <= 20 && (input == String(num))) {
+        autoCycle = (num == 8);
+        currentMode = (num == 8) ? 1 : num;
+        if (num == 0) setRGB(0, 0, 0);
+        Serial.printf("\r\n>> Switched to Mode %d!\n\r", num);
+    } else if (input == "+") {
+        if (masterBrightness <= 90) masterBrightness += 10; else masterBrightness = 100;
+        Serial.printf("\r\n>> Brightness: %d%%\n\r", masterBrightness);
+    } else if (input == "-") {
+        if (masterBrightness >= 15) masterBrightness -= 10; else masterBrightness = 5;
+        Serial.printf("\r\n>> Brightness: %d%%\n\r", masterBrightness);
+    } else if (input.startsWith("pin ")) {
+        int newPin = input.substring(4).toInt();
+        if (newPin >= 0 && newPin <= 48) {
+            setRGB(0, 0, 0);
+            rgbPin = newPin;
+            Serial.printf("\r\n>> Inbuilt RGB Pin changed to GPIO %d!\n\r", rgbPin);
+        } else {
+            Serial.println("\r\n>> Invalid GPIO number!");
+        }
+    } else if (input.equalsIgnoreCase("help") || input == "?") {
+        printMenu();
+    } else {
+        Serial.printf("\r\n>> Unknown command: '%s'. Type 'help' for menu.\n\r", input.c_str());
+    }
+}
+
+void processIncomingChar(char c) {
+    // Check for high-speed serial command starting with '!'
+    if (isSerialCommand) {
+        if (c == '\n' || c == '\r') {
+            if (serialCmdBuffer.length() > 0) {
+                processSerialProtocol(serialCmdBuffer);
+                serialCmdBuffer = "";
+            }
+            isSerialCommand = false;
+        } else {
+            serialCmdBuffer += c;
+        }
+        return;
+    }
+
+    if (c == '!') {
+        isSerialCommand = true;
+        serialCmdBuffer = "";
+        return;
+    }
+
+    // Normal terminal CLI handling
+    if (c == '\r' || c == '\n') {
+        if (terminalBuffer.length() > 0) {
+            Serial.println();
+            processTerminalInput(terminalBuffer);
+            terminalBuffer = "";
+            Serial.print("\r\nEnter command >> ");
+        } else {
+            printMenu();
+        }
+    } else if (c == 8 || c == 127) {
+        if (terminalBuffer.length() > 0) {
+            terminalBuffer.remove(terminalBuffer.length() - 1);
+            Serial.print("\b \b");
+        }
+    } else {
+        terminalBuffer += c;
+        Serial.print(c);
+        if (terminalBuffer.length() == 1) {
+            char k = terminalBuffer[0];
+            if ((k >= '0' && k <= '8') || k == '+' || k == '-') {
+                Serial.println();
+                processTerminalInput(terminalBuffer);
+                terminalBuffer = "";
+                Serial.print("\r\nEnter command >> ");
+            }
+        }
+    }
+}
+
+// ====================================================================
+// 🚀 ARDUINO SETUP & LOOP
+// ====================================================================
+void setup() {
+    Serial.begin(115200);
+
+    // 0. Thermal & Power Optimizations (Keeps ESP32 cool and prevents overheating!)
+    setCpuFrequencyMhz(160); // 160 MHz: fast and punchy, yet generates 40% less heat than 240 MHz
+    WiFi.setTxPower(WIFI_POWER_13dBm); // 13 dBm: cuts RF heating by ~40% while easily covering room
+    WiFi.setSleep(true); // Enables 802.11 modem sleep between beacon intervals
+
+    // 1. Wi-Fi Dual Mode: AP + Station
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(ap_ssid, ap_pass);
+    Serial.printf("\n\r[Wi-Fi AP] SSID: %s (Password: %s)\n\r", ap_ssid, ap_pass);
+    Serial.printf("[Wi-Fi AP IP] http://%s\n\r", WiFi.softAPIP().toString().c_str());
+
+    // Connect to saved Home Wi-Fi credentials if present (default: GUEST / iitram*123)
+    preferences.begin("wifi_cfg", false);
+    String savedSSID = preferences.getString("ssid", "GUEST");
+    String savedPass = preferences.getString("pass", "iitram*123");
+    preferences.end();
+
+    if (savedSSID.length() > 0) {
+        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+        Serial.printf("[Wi-Fi STA] Connecting to Wi-Fi '%s' ...\n\r", savedSSID.c_str());
+    }
+
+    // 2. Setup mDNS (allows http://esp32-rgb.local)
+    if (MDNS.begin("esp32-rgb")) {
+        Serial.println("[mDNS] Active! Hostname: http://esp32-rgb.local");
+    }
+
+    // 3. Setup Web Server Endpoints
+    server.on("/", HTTP_GET, handleRoot);
+    server.on("/api/mode", HTTP_GET, handleSetMode);
+    server.on("/api/color", HTTP_GET, handleSetColor);
+    server.on("/api/brightness", HTTP_GET, handleSetBrightness);
+    server.on("/api/beat", HTTP_GET, handleBeat);
+    server.on("/api/custom/set", HTTP_GET, handleSetCustomSequence);
+    server.on("/api/wifi", HTTP_GET, handleSetWiFi);
+    server.enableCORS(true);
+    server.begin();
+    Serial.println("[Web] HTTP Server active on port 80 with CORS!");
+
+    // 4. Setup Bluetooth Low Energy (Nordic UART Service for Web Bluetooth)
+    BLEDevice::init("ESP32-RGB-Studio");
+    pBleServer = BLEDevice::createServer();
+    pBleServer->setCallbacks(new MyBleServerCallbacks());
+
+    BLEService *pBleService = pBleServer->createService(BLE_SERVICE_UUID);
+    pBleTxCharacteristic = pBleService->createCharacteristic(
+        BLE_CHARACTERISTIC_UUID_TX,
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+    pBleTxCharacteristic->addDescriptor(new BLE2902());
+
+    BLECharacteristic *pBleRxCharacteristic = pBleService->createCharacteristic(
+        BLE_CHARACTERISTIC_UUID_RX,
+        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+    );
+    pBleRxCharacteristic->setCallbacks(new MyBleRxCallbacks());
+
+    pBleService->start();
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    
+    BLEAdvertisementData advData;
+    advData.setFlags(0x06); // General Discoverable + BR/EDR not supported
+    advData.setName("ESP32-RGB-Studio");
+
+    BLEAdvertisementData scanData;
+    scanData.setCompleteServices(BLEUUID(BLE_SERVICE_UUID));
+    scanData.setName("ESP32-RGB-Studio");
+
+    pAdvertising->setAdvertisementData(advData);
+    pAdvertising->setScanResponseData(scanData);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x20); // Low-heat advertising interval
+    pAdvertising->setMaxPreferred(0x40);
+    BLEDevice::startAdvertising();
+    Serial.println("[BLE] Active! Advertising as 'ESP32-RGB-Studio' (Web Bluetooth Enabled)");
+}
+
+void loop() {
+    unsigned long now = millis();
+
+    // 1. Handle HTTP Requests
+    server.handleClient();
+
+    // 2. Announce Home Wi-Fi connection if established
+    static bool staConnectedAnnounced = false;
+    if (WiFi.status() == WL_CONNECTED && !staConnectedAnnounced) {
+        staConnectedAnnounced = true;
+        // Turn OFF SoftAP beaconing when connected to Wi-Fi to stop excess RF heat!
+        WiFi.mode(WIFI_STA);
+        Serial.printf("\n\r[Wi-Fi STA] Connected to Network! Local IP: http://%s\n\r", WiFi.localIP().toString().c_str());
+        Serial.println("[Wi-Fi STA] SoftAP disabled to keep chip cool and silent.\n\rEnter command >> ");
+    } else if (WiFi.status() != WL_CONNECTED && staConnectedAnnounced) {
+        staConnectedAnnounced = false;
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP(ap_ssid, ap_pass);
+    }
+
+    // 3. Bluetooth Reconnect Handling
+    if (!bleDeviceConnected && oldBleDeviceConnected) {
+        delay(20);
+        pBleServer->startAdvertising();
+        Serial.println("\r\n[BLE] Advertising restarted...");
+        oldBleDeviceConnected = bleDeviceConnected;
+    }
+    if (bleDeviceConnected && !oldBleDeviceConnected) {
+        oldBleDeviceConnected = bleDeviceConnected;
+    }
+
+    // 4. Auto-detect Serial connect & print menu
+    if (Serial && !menuPrinted) {
+        menuPrinted = true;
+        delay(150);
+        printMenu();
+    }
+
+    // 5. Process Serial Terminal & High-Speed USB Protocol
+    while (Serial.available() > 0) {
+        char c = (char)Serial.read();
+        processIncomingChar(c);
+    }
+
+    // 6. Auto-Cycle Mode Switching
+    if (autoCycle && (now - lastAutoSwitch >= AUTO_CYCLE_INTERVAL)) {
+        lastAutoSwitch = now;
+        currentMode = (currentMode % 20) + 1;
+        Serial.printf("\r\n[Auto Cycle] >> Switched to Mode %d\n\r", currentMode);
+        Serial.print("Enter command >> ");
+    }
+
+    // 7. Render Active Lighting Mode
+    switch (currentMode) {
+        case 1:  modeAurora(now); break;
+        case 2:  modeCyberpunk(now); break;
+        case 3:  modeCampfire(now); break;
+        case 4:  modeRainbow(now); break;
+        case 5:  modeStrobe(now); break;
+        case 6:  modeBreathingWhite(now); break;
+        case 7:  modeTrafficLight(now); break;
+        case 9:  modeLightning(now); break;
+        case 10: modePartyBeat(now); break;
+        case 11: modeBeatReactive(now); break; // Dynamic Beat Reactive
+        case 12: modeThriller(now); break;
+        case 13: modePeace(now); break;
+        case 14: modeOcean(now); break;
+        case 15: modeVolcano(now); break;
+        case 16: modeForest(now); break;
+        case 17: modeCandle(now); break;
+        case 18: modeNeonTokyo(now); break;
+        case 19: modeGlacier(now); break;
+        case 20: modeMatrix(now); break;
+        case -1: setRGB(staticR, staticG, staticB); break; // Free Solid Light / Lamp
+        case -2: runCustomSequence(now); break;
+        case 0:  setRGB(0, 0, 0); break;
+    }
+
+    delay(4); // 250Hz cycle: responsive while letting FreeRTOS idle task run light sleep to keep chip cool
+}
