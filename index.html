@@ -302,10 +302,10 @@
 
 <!-- Navigation Tabs -->
 <div class="nav-tabs">
-  <button class="tab-btn active" onclick="switchTab('tab-sync')">🎧 Earbuds Sync</button>
-  <button class="tab-btn" onclick="switchTab('tab-gemini')">🤖 Gemini AI</button>
-  <button class="tab-btn" onclick="switchTab('tab-presets')">🎭 20 Presets</button>
-  <button class="tab-btn" onclick="switchTab('tab-custom')">🛠️ Studio & Wi-Fi</button>
+  <button class="tab-btn active" onclick="switchTab('tab-sync', this)">🎧 Earbuds Sync</button>
+  <button class="tab-btn" onclick="switchTab('tab-gemini', this)">🤖 Gemini AI</button>
+  <button class="tab-btn" onclick="switchTab('tab-presets', this)">🎭 20 Presets</button>
+  <button class="tab-btn" onclick="switchTab('tab-custom', this)">🛠️ Studio & Wi-Fi</button>
 </div>
 
 <div class="container">
@@ -315,8 +315,16 @@
 
     <!-- Master Power & Brightness -->
     <div class="card">
-      <div class="power-row">
-        <button class="btn-power btn-off" onclick="setMode(0)">⏻ Turn LED OFF</button>
+      <div class="power-row" style="display:flex; gap:10px; margin-bottom:12px;">
+        <button class="btn-power btn-on" onclick="turnLedOn()" style="flex:1; background:linear-gradient(135deg, #10b981, #059669); color:white; font-weight:700; border:none; padding:12px; border-radius:10px; cursor:pointer; font-size:0.95rem; box-shadow:0 0 15px rgba(16,185,129,0.35);">⏻ Turn LED ON</button>
+        <button class="btn-power btn-off" onclick="setMode(0)" style="flex:1;">⏻ Turn LED OFF</button>
+      </div>
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:6px; font-weight:700;">⚡ Quick 1-Tap Moods (Instant ON):</div>
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:14px;">
+        <button class="lamp-preset-btn" onclick="setMode(1)" style="border-color:#10b981; background:rgba(16,185,129,0.15);">🌌 Aurora</button>
+        <button class="lamp-preset-btn" onclick="setMode(4)" style="border-color:#ec4899; background:rgba(236,72,153,0.15);">🌈 Rainbow</button>
+        <button class="lamp-preset-btn" onclick="setMode(3)" style="border-color:#f59e0b; background:rgba(245,158,11,0.15);">🔥 Campfire</button>
+        <button class="lamp-preset-btn" onclick="setLampColor(255,200,140)" style="border-color:#eab308; background:rgba(234,179,8,0.15);">💡 Cozy Lamp</button>
       </div>
       <div class="slider-box">
         <div class="slider-header">
@@ -696,11 +704,25 @@
 </div>
 
 <script>
-  function switchTab(tabId) {
+  function switchTab(tabId, el) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    document.getElementById(tabId).classList.add('active');
+    const targetContent = document.getElementById(tabId);
+    if (targetContent) targetContent.classList.add('active');
+    
+    if (el) {
+      el.classList.add('active');
+    } else {
+      const btn = document.querySelector(`button[onclick*="'${tabId}'"]`);
+      if (btn) btn.classList.add('active');
+    }
+  }
+
+  function turnLedOn() {
+    setMode(1);
+    updateVirtualLed(0, 255, 120, 255);
+    document.getElementById('status-pill').textContent = '● Mode 1 (ON)';
+    document.getElementById('active-mode-title').textContent = 'Mode: Aurora Borealis';
   }
 
   function updateVirtualLed(r, g, b, alpha=255) {
@@ -844,6 +866,33 @@
     };
     document.getElementById('active-mode-title').textContent = "Mode: " + (titles[modeNum] || ("Mode " + modeNum));
     document.getElementById('status-pill').textContent = (modeNum === 0) ? '● OFF' : '● Mode ' + modeNum;
+    
+    // Live Virtual LED Preview Orb sync
+    const previewColors = {
+      0: [0, 0, 0, 0],
+      1: [0, 255, 128, 255],
+      2: [255, 0, 140, 255],
+      3: [255, 90, 20, 255],
+      4: [255, 50, 220, 255],
+      5: [255, 255, 255, 255],
+      6: [255, 255, 255, 255],
+      7: [255, 180, 0, 255],
+      8: [0, 220, 255, 255],
+      9: [255, 255, 255, 255],
+      10: [255, 0, 80, 255],
+      11: [99, 102, 241, 255],
+      12: [220, 0, 40, 255],
+      13: [64, 224, 208, 255],
+      14: [0, 120, 255, 255],
+      15: [255, 40, 0, 255],
+      16: [34, 197, 94, 255],
+      17: [255, 140, 20, 255],
+      18: [244, 63, 94, 255],
+      19: [186, 230, 253, 255],
+      20: [34, 197, 94, 255]
+    };
+    let c = previewColors[modeNum] || [99, 102, 241, 255];
+    updateVirtualLed(c[0], c[1], c[2], c[3]);
   }
 
   // 💡 FREE SOLID LAMP MODE (CONTINUOUS ON)
@@ -1448,34 +1497,32 @@
     analyser.getByteFrequencyData(dataArray);
 
     // Multi-Band Extraction:
-    // Sub-bass & Kicks (Bins 1-3: ~30-180 Hz)
-    let kick = 0; for (let i = 1; i <= 3; i++) kick += dataArray[i]; kick /= 3;
-    // Lower & Mid Range - Snares, Vocals, Rhythm Synths (Bins 5-16: ~300-1100 Hz)
-    let mids = 0; for (let i = 5; i <= 16; i++) mids += dataArray[i]; mids /= 12;
-    // Highs & Treble - Cymbals, Hi-Hats, Sparkles (Bins 18-50: ~1200-3800 Hz)
-    let treble = 0; for (let i = 18; i <= 50; i++) treble += dataArray[i]; treble /= 33;
+    // Sub-bass & Kicks (Bins 0-3: ~0-280 Hz, includes kick foundation)
+    let kick = (dataArray[0] + dataArray[1] + dataArray[2] + dataArray[3]) / 4;
+    // Lower & Mid Range - Snares, Vocals, Rhythm Synths (Bins 4-16: ~300-1100 Hz)
+    let mids = 0; for (let i = 4; i <= 16; i++) mids += dataArray[i]; mids /= 13;
+    // Highs & Treble - Cymbals, Hi-Hats, Sparkles (Bins 17-50: ~1200-3800 Hz)
+    let treble = 0; for (let i = 17; i <= 50; i++) treble += dataArray[i]; treble /= 34;
 
-    let totalEnergy = (kick * 1.5 + mids * 1.1 + treble * 0.8) / 3.4;
+    let totalEnergy = (kick * 1.4 + mids * 1.1 + treble * 0.8) / 3.3;
 
     // Dynamic Automatic Gain Control (AGC) - Adapts to low or high Spotify volume
     maxKickObserved = Math.max(kick, maxKickObserved * 0.996);
-    if (maxKickObserved < 25) maxKickObserved = 25;
+    if (maxKickObserved < 20) maxKickObserved = 20;
 
     maxMidObserved = Math.max(mids, maxMidObserved * 0.996);
-    if (maxMidObserved < 20) maxMidObserved = 20;
+    if (maxMidObserved < 15) maxMidObserved = 15;
 
-    avgKickEnvelope = avgKickEnvelope * 0.91 + kick * 0.09;
-    avgMidEnvelope = avgMidEnvelope * 0.91 + mids * 0.09;
+    avgKickEnvelope = avgKickEnvelope * 0.90 + kick * 0.10;
+    avgMidEnvelope = avgMidEnvelope * 0.90 + mids * 0.10;
 
     let now = Date.now();
     let badge = document.getElementById('beat-status-badge');
 
     // 🛑 1. TRUE DIGITAL SILENCE / SPOTIFY PAUSE DETECTION
-    // Requires totalEnergy < 3.5 continuously for 25 frames (~400ms of true digital silence)
-    // Never falsely triggers during quiet musical beats!
-    if (totalEnergy < 3.5) {
+    if (totalEnergy < 2.5) {
       silenceFrames++;
-      if (silenceFrames >= 25) {
+      if (silenceFrames >= 20) {
         updateMeters(0, 0, 0);
         drawPausedSpectrum(canvasCtx, canvas);
         badge.className = 'beat-badge drop';
@@ -1514,7 +1561,7 @@
     let avgRecent = recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length;
 
     // 3. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
-    let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 28);
+    let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 25);
     if (isDrop) {
       badge.className = 'beat-badge drop';
       badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
@@ -1523,26 +1570,21 @@
     }
     // 4. MULTI-LEVEL DYNAMIC BEAT DETECTION (Low Beats, Snares, and Heavy Kicks)
     else {
-      let kickOnset = kick - lastKickEnergy;
-      lastKickEnergy = kick;
-
-      let midOnset = mids - lastMidEnergy;
-      lastMidEnergy = mids;
-
-      // Sensitivity Multipliers: Level 1..5
-      let sensFactors = [0.7, 0.7, 0.85, 1.0, 1.25, 1.55];
-      let sens = sensFactors[beatSensitivityLevel] || 1.0;
-
+      let kickRatio = kick / Math.max(2, avgKickEnvelope);
+      let midRatio = mids / Math.max(2, avgMidEnvelope);
       let normKick = Math.min(1.0, kick / maxKickObserved);
       let normMid = Math.min(1.0, mids / maxMidObserved);
 
+      let sensFactors = [0.7, 0.75, 0.9, 1.0, 1.2, 1.45];
+      let sens = sensFactors[beatSensitivityLevel] || 1.0;
+
       // Detection tests:
-      let isHeavyKick = (kickOnset > (8 / sens) && kick > (avgKickEnvelope * 1.2 / sens)) || (normKick > 0.82);
-      let isSnareClap = !isHeavyKick && ((midOnset > (6 / sens) && mids > (avgMidEnvelope * 1.15 / sens)) || (normMid > 0.80));
-      let isLowBeat   = !isHeavyKick && !isSnareClap && ((kickOnset > (3 / sens) && kick > (avgKickEnvelope * 1.06 / sens)) || (normKick > 0.38 && (now - lastBeatTimestamp > 260)));
+      let isHeavyKick = (kickRatio > (1.18 / sens) && kick > 12) || (normKick > 0.72);
+      let isSnareClap = !isHeavyKick && ((midRatio > (1.14 / sens) && mids > 10) || (normMid > 0.65));
+      let isLowBeat   = !isHeavyKick && !isSnareClap && ((kickRatio > (1.05 / sens) && kick > 6) || (normKick > 0.28 && (now - lastBeatTimestamp > 140)));
 
       let beatHit = isHeavyKick || isSnareClap || isLowBeat;
-      let minGap = isHeavyKick ? 120 : (isSnareClap ? 90 : 75);
+      let minGap = isHeavyKick ? 90 : (isSnareClap ? 70 : 50);
 
       if (beatHit && (now - lastBeatTimestamp > minGap)) {
         lastBeatTimestamp = now;
@@ -1552,26 +1594,26 @@
         let [r, g, b] = [255, 255, 255];
 
         if (isHeavyKick) {
-          // 🔥 HEAVY BEAT: Bright punch (200 to 255 brightness)
-          intensity = Math.round(200 + normKick * 55);
+          // 🔥 HEAVY BEAT: Bright punch (210 to 255 brightness)
+          intensity = Math.round(210 + normKick * 45);
           decayMs = activeDecay;
           [r, g, b] = getMusicModeColor(true, kick, mids, treble);
           badge.className = 'beat-badge peak';
           badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
         } else if (isSnareClap) {
-          // 🥁 SNARE / RHYTHM: Crisp, snappy strike (125 to 185 brightness)
-          intensity = Math.round(125 + normMid * 60);
+          // 🥁 SNARE / RHYTHM: Crisp, snappy strike (140 to 200 brightness)
+          intensity = Math.round(140 + normMid * 60);
           decayMs = Math.round(activeDecay * 0.75);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
           badge.className = 'beat-badge normal';
           badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
         } else {
-          // 🫧 LOW / SOFT BEAT: Subtle mellow glow (50 to 110 brightness)
-          intensity = Math.round(50 + normKick * 60);
-          decayMs = Math.round(activeDecay * 0.55);
+          // 🫧 LOW / SOFT BEAT: Subtle mellow glow (75 to 135 brightness)
+          intensity = Math.round(75 + normKick * 60);
+          decayMs = Math.round(activeDecay * 0.60);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
           badge.className = 'beat-badge normal';
-          badge.textContent = `🫧 SOFT BEAT (Glow ${intensity})`;
+          badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
         }
 
         updateVirtualLed(r, g, b, intensity);
@@ -1581,6 +1623,13 @@
         } else {
           dispatchDynamicBeat(r, g, b, intensity, decayMs);
         }
+      } else if (now - lastBeatTimestamp > 180 && totalEnergy > 6) {
+        // Continuous ambient musical breathing pulse so LED stays alive during musical flow
+        lastBeatTimestamp = now;
+        let [r, g, b] = getMusicModeColor(false, kick, mids, treble);
+        let ambientIntensity = Math.min(65, Math.max(30, Math.round(totalEnergy * 0.8)));
+        updateVirtualLed(r, g, b, ambientIntensity);
+        dispatchDynamicBeat(r, g, b, ambientIntensity, 240);
       }
     }
 
