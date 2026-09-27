@@ -651,8 +651,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <!-- Live Virtual LED Preview Orb -->
 <div class="preview-bar">
   <div class="led-orb" id="virtual-led"></div>
-  <div class="led-info">
-    <b id="active-mode-title">Mode: Aurora Borealis</b>
+  <div class="led-info" style="flex:1;">
+    <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+      <b id="active-mode-title">Mode: Aurora Borealis</b>
+      <span class="status-pill" id="status-pill">● Mode 1 (ON)</span>
+    </div>
     <span id="active-rgb-val" style="color:var(--subtext); font-size:0.75rem;">RGB(0, 0, 0)</span>
   </div>
 </div>
@@ -1075,22 +1078,37 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     }
   }
 
+  function setStatusPill(text) {
+    const el = document.getElementById('status-pill');
+    if (el) el.textContent = text;
+  }
+
+  function setActiveModeTitle(text) {
+    const el = document.getElementById('active-mode-title');
+    if (el) el.textContent = text;
+  }
+
   function turnLedOn() {
     setMode(1);
     updateVirtualLed(0, 255, 120, 255);
-    document.getElementById('status-pill').textContent = '● Mode 1 (ON)';
-    document.getElementById('active-mode-title').textContent = 'Mode: Aurora Borealis';
+    setStatusPill('● Mode 1 (ON)');
+    setActiveModeTitle('Mode: Aurora Borealis');
   }
 
   function updateVirtualLed(r, g, b, alpha=255) {
     let orb = document.getElementById('virtual-led');
     let a = alpha / 255.0;
-    orb.style.background = `rgba(${r}, ${g}, ${b}, ${Math.max(0.15, a)})`;
-    orb.style.boxShadow = `0 0 ${Math.round(24 * a)}px rgba(${r}, ${g}, ${b}, ${a * 0.9}), inset 0 0 10px rgba(0,0,0,0.5)`;
-    document.getElementById('active-rgb-val').textContent = `RGB(${r}, ${g}, ${b}) • ${Math.round(a * 100)}%`;
+    if (orb) {
+      orb.style.background = `rgba(${r}, ${g}, ${b}, ${Math.max(0.15, a)})`;
+      orb.style.boxShadow = `0 0 ${Math.round(24 * a)}px rgba(${r}, ${g}, ${b}, ${a * 0.9}), inset 0 0 10px rgba(0,0,0,0.5)`;
+    }
+    let rgbVal = document.getElementById('active-rgb-val');
+    if (rgbVal) rgbVal.textContent = `RGB(${r}, ${g}, ${b}) • ${Math.round(a * 100)}%`;
     let hex = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-    document.getElementById('live-color-chip').style.background = hex;
-    document.getElementById('live-color-hex').textContent = hex;
+    let chip = document.getElementById('live-color-chip');
+    if (chip) chip.style.background = hex;
+    let hexVal = document.getElementById('live-color-hex');
+    if (hexVal) hexVal.textContent = hex;
   }
 
   // ====================================================================
@@ -1107,7 +1125,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   async function toggleBluetoothConnect() {
     if (!navigator.bluetooth) {
-      alert("Web Bluetooth requires Google Chrome or Microsoft Edge on localhost or HTTPS.\n\nPlease open http://localhost:8000 in Chrome to connect via Bluetooth!\n\n(Also ensure Bluetooth is turned ON in Windows Settings)");
+      alert("Web Bluetooth requires Google Chrome or Microsoft Edge on localhost or HTTPS.
+
+Please open http://localhost:8000 in Chrome to connect via Bluetooth!
+
+(Also ensure Bluetooth is turned ON in Windows Settings)");
       return;
     }
     if (bleConnected) {
@@ -1146,7 +1168,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         // User closed or canceled the native browser pairing prompt
         return;
       }
-      alert("Bluetooth notice:\n" + err.message + "\n\n1. Make sure Bluetooth is ON in Windows Settings.\n2. Make sure ESP32 is powered on.");
+      alert("Bluetooth notice:
+" + err.message + "
+
+1. Make sure Bluetooth is ON in Windows Settings.
+2. Make sure ESP32 is powered on.");
     }
   }
 
@@ -1204,7 +1230,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   function sendHardwareCommand(cmd, fallbackUrl) {
     if (bleConnected && bleRxCharacteristic) {
-      sendBleCommand(cmd + '\n');
+      sendBleCommand(cmd + '
+');
     }
     if (fallbackUrl) {
       fetch(fallbackUrl).catch(() => {});
@@ -1221,8 +1248,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       17: "Candlelight Flicker", 18: "Neon Tokyo Synth", 19: "Glacier Ice Frost", 20: "Matrix Cyber Rain",
       0: "LED OFF", "-1": "Solid Free Light", "-2": "Custom Sequence"
     };
-    document.getElementById('active-mode-title').textContent = "Mode: " + (titles[modeNum] || ("Mode " + modeNum));
-    document.getElementById('status-pill').textContent = (modeNum === 0) ? '● OFF' : '● Mode ' + modeNum;
+    setActiveModeTitle("Mode: " + (titles[modeNum] || ("Mode " + modeNum)));
+    setStatusPill((modeNum === 0) ? '● OFF' : '● Mode ' + modeNum);
     
     // Live Virtual LED Preview Orb sync
     const previewColors = {
@@ -1257,15 +1284,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     stopAllAudio(); // Ensure audio react is completely stopped
     sendHardwareCommand(`!C:${r},${g},${b}`, `/api/color?r=${r}&g=${g}&b=${b}`);
     updateVirtualLed(r, g, b, 255);
-    document.getElementById('active-mode-title').textContent = "Mode: Solid Ambient Lamp";
-    document.getElementById('status-pill').textContent = "● Lamp (Solid ON)";
+    setActiveModeTitle("Mode: Solid Ambient Lamp");
+    setStatusPill("● Lamp (Solid ON)");
   }
 
   function onLampHexColor(hex) {
     let r = parseInt(hex.slice(1, 3), 16);
     let g = parseInt(hex.slice(3, 5), 16);
     let b = parseInt(hex.slice(5, 7), 16);
-    document.getElementById('lamp-hex-display').textContent = hex.toUpperCase();
+    let hexDisp = document.getElementById('lamp-hex-display');
+    if (hexDisp) hexDisp.textContent = hex.toUpperCase();
     setLampColor(r, g, b);
   }
 
@@ -1278,7 +1306,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   }
 
   function onBrightness(val) {
-    document.getElementById('bright-val').textContent = val + '%';
+    let bv = document.getElementById('bright-val');
+    if (bv) bv.textContent = val + '%';
     sendHardwareCommand('!BR:' + val, '/api/brightness?val=' + val);
   }
 
@@ -1287,7 +1316,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   function onOffsetChange(val) {
     syncOffsetMs = parseInt(val);
     let label = (syncOffsetMs === 0) ? '0 ms (Instant)' : ((syncOffsetMs > 0 ? '+' : '') + syncOffsetMs + ' ms');
-    document.getElementById('offset-val').textContent = label;
+    let ov = document.getElementById('offset-val');
+    if (ov) ov.textContent = label;
   }
 
   // ⏱️ Pacing / Minimum Beat Interval & Decay
@@ -1328,8 +1358,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     let g = parseInt(hex.slice(3, 5), 16);
     let b = parseInt(hex.slice(5, 7), 16);
     freeMusicColorRGB = [r, g, b];
-    document.getElementById('free-music-picker').value = hex;
-    document.getElementById('free-color-preview-hex').textContent = hex.toUpperCase();
+    let picker = document.getElementById('free-music-picker');
+    if (picker) picker.value = hex;
+    let hexEl = document.getElementById('free-color-preview-hex');
+    if (hexEl) hexEl.textContent = hex.toUpperCase();
     setMusicMode('free');
   }
 
@@ -1448,12 +1480,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     let pm = Math.round((displayMids / 255) * 100);
     let pt = Math.round((displayTreb / 255) * 100);
 
-    document.getElementById('meter-bass').style.width = pb + '%';
-    document.getElementById('val-bass').textContent = pb + '%';
-    document.getElementById('meter-mids').style.width = pm + '%';
-    document.getElementById('val-mids').textContent = pm + '%';
-    document.getElementById('meter-treble').style.width = pt + '%';
-    document.getElementById('val-treble').textContent = pt + '%';
+    let mb = document.getElementById('meter-bass');
+    if (mb) mb.style.width = pb + '%';
+    let vb = document.getElementById('val-bass');
+    if (vb) vb.textContent = pb + '%';
+
+    let mm = document.getElementById('meter-mids');
+    if (mm) mm.style.width = pm + '%';
+    let vm = document.getElementById('val-mids');
+    if (vm) vm.textContent = pm + '%';
+
+    let mt = document.getElementById('meter-treble');
+    if (mt) mt.style.width = pt + '%';
+    let vt = document.getElementById('val-treble');
+    if (vt) vt.textContent = pt + '%';
   }
 
   // ====================================================================
@@ -1483,20 +1523,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       audioPlayer.currentTime = 0;
     }
 
-    let btnSync = document.getElementById('btn-sync-toggle');
-    if (btnSync) {
-      btnSync.classList.remove('active');
-      document.getElementById('sync-text').textContent = 'START EARBUDS BEAT: ON';
-      document.getElementById('sync-icon').textContent = '▶';
-    }
+    const btnSync = document.getElementById('btn-sync-toggle');
+    if (btnSync) btnSync.classList.remove('active');
+    const syncTxt = document.getElementById('sync-text');
+    if (syncTxt) syncTxt.textContent = 'START EARBUDS BEAT: ON';
+    const syncIcon = document.getElementById('sync-icon');
+    if (syncIcon) syncIcon.textContent = '▶';
 
     let micLabel = document.getElementById('mic-btn-label');
     if (micLabel) micLabel.textContent = 'Start External Microphone Scanner';
 
-    document.getElementById('hud-status').textContent = '⏹️ Stopped (LED Off)';
-    document.getElementById('beat-status-badge').className = 'beat-badge normal';
-    document.getElementById('beat-status-badge').textContent = 'Stopped / Idle';
-    document.getElementById('status-pill').textContent = '● Stopped';
+    const hud = document.getElementById('hud-status');
+    if (hud) hud.textContent = '⏹️ Stopped (LED Off)';
+    const badge = document.getElementById('beat-status-badge');
+    if (badge) {
+      badge.className = 'beat-badge normal';
+      badge.textContent = 'Stopped / Idle';
+    }
+    setStatusPill('● Stopped');
 
     updateMeters(0, 0, 0);
     updateVirtualLed(0, 0, 0, 0);
@@ -1557,11 +1601,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     let icon = document.getElementById('sync-icon');
 
     if (isEarbudsSyncActive) {
-      btn.classList.add('active');
-      txt.textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
-      icon.textContent = '⏹';
-      document.getElementById('hud-status').textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
-      document.getElementById('status-pill').textContent = '● Beat Sync ON';
+      if (btn) btn.classList.add('active');
+      if (txt) txt.textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
+      if (icon) icon.textContent = '⏹';
+      const hud = document.getElementById('hud-status');
+      if (hud) hud.textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
+      setStatusPill('● Beat Sync ON');
       setMode(11);
       startEarbudsLoop();
       requestAnimationFrame(earbudsMonitorLoop);
@@ -1572,10 +1617,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   function onBpmSlider(bpm) {
     currentBPM = parseInt(bpm);
-    document.getElementById('bpm-display').textContent = currentBPM + ' BPM';
+    let bpmDisp = document.getElementById('bpm-display');
+    if (bpmDisp) bpmDisp.textContent = currentBPM + ' BPM';
     if (isEarbudsSyncActive) {
-      document.getElementById('sync-text').textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
-      document.getElementById('hud-status').textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
+      let syncTxt = document.getElementById('sync-text');
+      if (syncTxt) syncTxt.textContent = 'EARBUDS BEAT: ACTIVE (' + currentBPM + ' BPM)';
+      let hud = document.getElementById('hud-status');
+      if (hud) hud.textContent = '🎧 Earbuds Beat Active (' + currentBPM + ' BPM)';
       startEarbudsLoop();
     }
   }
@@ -1772,7 +1820,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   // ====================================================================
   async function startLaptopSpotifyCapture() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      document.getElementById('secure-modal').style.display = 'flex';
+      const modal = document.getElementById('secure-modal');
+      if (modal) modal.style.display = 'flex';
       return;
     }
     try {
@@ -1782,19 +1831,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       });
       let audioTracks = audioStream.getAudioTracks();
       if (audioTracks.length === 0) {
-        alert("⚠️ Please check 'Share audio' or 'Also share tab audio' in the prompt window!");
+        alert("⚠️ Audio was not shared!
+
+Please click 'Sync Laptop Spotify Directly' again, pick your Spotify tab/window, and make sure the 'Share audio' / 'Also share tab audio' checkbox is CHECKED!");
         audioStream.getTracks().forEach(t => t.stop());
         return;
       }
       setupStreamAudio(audioStream, "💻 Laptop Spotify Audio Active");
     } catch(err) {
-      if (err.name !== 'NotAllowedError') alert("Audio Capture Error: " + err.message);
+      if (err.name !== 'NotAllowedError') {
+        alert("Audio Capture Notice: " + err.message);
+      }
     }
   }
 
   async function toggleMicrophone() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      document.getElementById('secure-modal').style.display = 'flex';
+      const modal = document.getElementById('secure-modal');
+      if (modal) modal.style.display = 'flex';
       return;
     }
     if (isListening) {
@@ -1804,20 +1858,40 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     try {
       audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setupStreamAudio(audioStream, "🎙️ Live Microphone Active");
-      document.getElementById('mic-btn-label').textContent = 'Stop Microphone Scanner';
+      const ml = document.getElementById('mic-btn-label');
+      if (ml) ml.textContent = 'Stop Microphone Scanner';
     } catch(err) {
-      alert("Microphone error: " + err.message);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        alert("🎤 Microphone Access Denied!
+
+Your browser or Windows settings have microphone blocked for localhost:8000.
+
+To allow it in Chrome / Edge:
+1. Click the 'View site info' / tune icon (left of the address bar 'localhost:8000').
+2. Toggle 'Microphone' to ALLOW.
+3. Refresh this page!
+
+💡 Tip: You can also use 'Sync Laptop Spotify Directly' or load an MP3 file directly without needing microphone access!");
+      } else {
+        alert("Microphone Notice: " + err.message);
+      }
     }
   }
 
   function setupStreamAudio(stream, label) {
-    initWebAudio();
-    let src = audioCtx.createMediaStreamSource(stream);
-    src.connect(analyser);
-    isListening = true;
-    document.getElementById('hud-status').textContent = label;
-    setMode(11);
-    processDynamicAudioLoop();
+    try {
+      initWebAudio();
+      let src = audioCtx.createMediaStreamSource(stream);
+      src.connect(analyser);
+      isListening = true;
+      const hud = document.getElementById('hud-status');
+      if (hud) hud.textContent = label;
+      setMode(11);
+      processDynamicAudioLoop();
+    } catch(e) {
+      console.error("setupStreamAudio error:", e);
+      alert("Audio Stream Notice: " + e.message);
+    }
   }
 
   // ====================================================================
@@ -1843,7 +1917,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       4: "4 - Dynamic Punch (Very Reactive)",
       5: "5 - Maximum Sensitivity (Ultra-Fast)"
     };
-    document.getElementById('sens-display').textContent = labels[beatSensitivityLevel] || (val + '/5');
+    let sensDisp = document.getElementById('sens-display');
+    if (sensDisp) sensDisp.textContent = labels[beatSensitivityLevel] || (val + '/5');
   }
 
   function processDynamicAudioLoop() {
@@ -1882,8 +1957,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       if (silenceFrames >= 20) {
         updateMeters(0, 0, 0);
         drawPausedSpectrum(canvasCtx, canvas);
-        badge.className = 'beat-badge drop';
-        badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+        if (badge) {
+          badge.className = 'beat-badge drop';
+          badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+        }
         updateVirtualLed(0, 0, 0, 0);
 
         if (!isCurrentlySilent) {
@@ -1920,8 +1997,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     // 3. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
     let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 25);
     if (isDrop) {
-      badge.className = 'beat-badge drop';
-      badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+      if (badge) {
+        badge.className = 'beat-badge drop';
+        badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+      }
       updateVirtualLed(0, 0, 0, 0);
       dispatchDynamicBeat(0, 0, 0, 0, 70);
     }
@@ -1955,22 +2034,28 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
           intensity = Math.round(210 + normKick * 45);
           decayMs = activeDecay;
           [r, g, b] = getMusicModeColor(true, kick, mids, treble);
-          badge.className = 'beat-badge peak';
-          badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
+          if (badge) {
+            badge.className = 'beat-badge peak';
+            badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
+          }
         } else if (isSnareClap) {
           // 🥁 SNARE / RHYTHM: Crisp, snappy strike (140 to 200 brightness)
           intensity = Math.round(140 + normMid * 60);
           decayMs = Math.round(activeDecay * 0.75);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          badge.className = 'beat-badge normal';
-          badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
+          if (badge) {
+            badge.className = 'beat-badge normal';
+            badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
+          }
         } else {
           // 🫧 LOW / SOFT BEAT: Subtle mellow glow (75 to 135 brightness)
           intensity = Math.round(75 + normKick * 60);
           decayMs = Math.round(activeDecay * 0.60);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          badge.className = 'beat-badge normal';
-          badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
+          if (badge) {
+            badge.className = 'beat-badge normal';
+            badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
+          }
         }
 
         updateVirtualLed(r, g, b, intensity);
@@ -2076,7 +2161,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     descEl.textContent = 'Composing unique lighting recipe with Gemini 3.5 Flash...';
     btn.disabled = true;
 
-    let instruction = "You are a professional lighting designer for an ESP32 RGB LED. The user wants lighting for this concept, scene, song, or atmosphere: '" + prompt + "'.\nCreate a synchronized RGB lighting sequence (between 4 and 10 steps) matching the exact tempo, genre, rhythm, and color atmosphere.\n\nRespond ONLY with valid JSON in this exact structure without markdown backticks:\n{\n  \"moodTitle\": \"Short creative title\",\n  \"bpm\": 120,\n  \"vibe\": \"One sentence describing the lighting concept\",\n  \"steps\": [\n    {\"r\": 255, \"g\": 0, \"b\": 50, \"ms\": 400, \"fade\": 1},\n    {\"r\": 0, \"g\": 10, \"b\": 80, \"ms\": 500, \"fade\": 0}\n  ]\n}";
+    let instruction = "You are a professional lighting designer for an ESP32 RGB LED. The user wants lighting for this concept, scene, song, or atmosphere: '" + prompt + "'.
+Create a synchronized RGB lighting sequence (between 4 and 10 steps) matching the exact tempo, genre, rhythm, and color atmosphere.
+
+Respond ONLY with valid JSON in this exact structure without markdown backticks:
+{
+  \"moodTitle\": \"Short creative title\",
+  \"bpm\": 120,
+  \"vibe\": \"One sentence describing the lighting concept\",
+  \"steps\": [
+    {\"r\": 255, \"g\": 0, \"b\": 50, \"ms\": 400, \"fade\": 1},
+    {\"r\": 0, \"g\": 10, \"b\": 80, \"ms\": 500, \"fade\": 0}
+  ]
+}";
 
     try {
       let res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' + key, {
