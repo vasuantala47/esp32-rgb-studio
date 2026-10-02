@@ -379,37 +379,47 @@
 
       <canvas id="visualizer-canvas"></canvas>
 
-      <!-- Multi-Band Instrument Meters -->
+      <!-- 4-Band Multi-Instrument Spectrum Meters -->
       <div class="meter-container">
         <div class="meter-row">
-          <div class="meter-name">🥁 Kick / Sub-Bass</div>
+          <div class="meter-name">🥁 Kick / Bass</div>
           <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-bass" style="background:#ef4444;"></div></div>
           <div class="meter-val" id="val-bass">0%</div>
         </div>
         <div class="meter-row">
-          <div class="meter-name">🎸 Mids / Vocals</div>
+          <div class="meter-name">🎙️ Vocals & Lead</div>
+          <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-vocals" style="background:#ec4899;"></div></div>
+          <div class="meter-val" id="val-vocals">0%</div>
+        </div>
+        <div class="meter-row">
+          <div class="meter-name">🎸 Rhythm Synths</div>
           <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-mids" style="background:#06b6d4;"></div></div>
           <div class="meter-val" id="val-mids">0%</div>
         </div>
         <div class="meter-row">
-          <div class="meter-name">🎺 Treble / Snare</div>
+          <div class="meter-name">🎺 Snare / Treble</div>
           <div class="meter-bar-bg"><div class="meter-bar-fill" id="meter-treble" style="background:#f59e0b;"></div></div>
           <div class="meter-val" id="val-treble">0%</div>
         </div>
       </div>
 
-      <!-- Beat Status & Drop Detector -->
-      <div class="beat-indicator-box">
-        <div>
-          <span style="font-size:0.7rem; color:var(--subtext);">BEAT STATUS:</span>
+      <!-- Beat Status, Auto Feeling, Spike Phase & Pitch Note HUD -->
+      <div class="beat-indicator-box" style="flex-wrap:wrap; gap:8px;">
+        <div style="flex:1; min-width:140px;">
+          <span style="font-size:0.68rem; color:var(--subtext); display:block; margin-bottom:2px;">BEAT & SPIKE STATUS:</span>
           <div class="beat-badge normal" id="beat-status-badge">Waiting for sound...</div>
+          <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">
+            <span class="status-pill" id="auto-feeling-badge" style="font-size:0.65rem; background:rgba(236,72,153,0.15); color:#f472b6; border-color:rgba(236,72,153,0.3);">🎭 Vibe: Adaptive</span>
+            <span class="status-pill" id="live-pitch-note" style="font-size:0.65rem; background:rgba(6,182,212,0.15); color:#67e8f9; border-color:rgba(6,182,212,0.3);">🎵 Note: --</span>
+          </div>
         </div>
         <div style="text-align:right;">
-          <span style="font-size:0.7rem; color:var(--subtext);">ACTIVE COLOR:</span>
-          <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
-            <div id="live-color-chip" style="width:14px; height:14px; border-radius:50%; background:#6366f1; border:1px solid #fff;"></div>
-            <span id="live-color-hex" style="font-size:0.72rem; font-weight:700;">#6366F1</span>
+          <span style="font-size:0.68rem; color:var(--subtext); display:block; margin-bottom:2px;">ACTIVE COLOR:</span>
+          <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px; margin-top:2px;">
+            <div id="live-color-chip" style="width:16px; height:16px; border-radius:50%; background:#6366f1; border:1px solid #fff;"></div>
+            <span id="live-color-hex" style="font-size:0.75rem; font-weight:700;">#6366F1</span>
           </div>
+          <div id="spike-phase-badge" style="font-size:0.65rem; color:#a5b4fc; margin-top:3px; font-weight:700;">⚡ Spike: Normal</div>
         </div>
       </div>
 
@@ -432,11 +442,12 @@
         </div>
       </div>
 
-      <!-- 🎨 12 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR -->
+      <!-- 🎨 13 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR -->
       <div style="margin-top:10px;">
-        <span style="font-size:0.7rem; color:var(--subtext); font-weight:700;">🎨 MUSIC LIGHT MODES (12 MOODS + FREE CUSTOM COLOR):</span>
+        <span style="font-size:0.7rem; color:var(--subtext); font-weight:700;">🎨 MUSIC LIGHT MODES (13 MOODS + FREE CUSTOM COLOR):</span>
         <div class="music-modes-grid">
           <button class="music-mode-btn active" id="mode-cyber" onclick="setMusicMode('cyber')">🌆 Cyberpunk</button>
+          <button class="music-mode-btn" id="mode-autofeeling" onclick="setMusicMode('autofeeling')" style="background:linear-gradient(135deg, rgba(236,72,153,0.25), rgba(168,85,247,0.25)); border-color:#ec4899; color:#fce7f3;">🎭 Auto Feeling (AI Vibe)</button>
           <button class="music-mode-btn" id="mode-fire" onclick="setMusicMode('fire')">🔥 Fire & Bass</button>
           <button class="music-mode-btn" id="mode-disco" onclick="setMusicMode('disco')">🪩 Disco Party</button>
           <button class="music-mode-btn" id="mode-edm" onclick="setMusicMode('edm')">⚡ EDM White Burst</button>
@@ -478,6 +489,149 @@
             <input type="checkbox" id="chk-free-white-kick" checked>
             <span style="color:var(--text);">Flash white on heavy kick drops</span>
           </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🎛️ VOCAL WEIGHT, DYNAMIC RANGE & SPIKE DYNAMICS STUDIO -->
+    <div class="card" style="border-color: rgba(236, 72, 153, 0.35); background: linear-gradient(180deg, rgba(80, 7, 36, 0.25), var(--card-bg));">
+      <div class="card-title" style="color:#f472b6;">
+        <span>🎛️ Vocal Weight & Spike Dynamics Studio</span>
+        <span class="status-pill" style="background:rgba(236,72,153,0.15); color:#f472b6; border-color:rgba(236,72,153,0.3); font-size:0.65rem;">PRO AUDIO</span>
+      </div>
+
+      <!-- 🎙️ 1. VOCAL WEIGHT & LEAD SINGER ISOLATOR -->
+      <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div class="slider-header" style="margin-bottom:6px;">
+          <span style="font-weight:700; color:#f472b6;">🎙️ Vocal Weight & Prominence (Mid-High Voice)</span>
+          <b id="vocal-weight-display" style="color:#f472b6;">1.8x (Punchy Vocals)</b>
+        </div>
+        <input type="range" id="vocal-weight-slider" min="5" max="35" value="18" step="1" oninput="onVocalWeightChange(this.value)">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:0.72rem;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="chk-vocal-spotlight" onchange="onVocalSpotlightChange(this.checked)">
+            <span style="color:#fce7f3; font-weight:700;">🌟 Vocalist Spotlight Mode</span>
+          </label>
+          <span style="color:var(--subtext); font-size:0.68rem;">Singer voice drives light bloom</span>
+        </div>
+      </div>
+
+      <!-- 📈 2. DYNAMIC BRIGHTNESS RANGE (FLOOR & CEILING) -->
+      <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:700; color:#38bdf8; font-size:0.75rem;">📈 Song Reaction Brightness Range</span>
+          <b id="range-summary-display" style="color:#38bdf8; font-size:0.75rem;">0% - 100%</b>
+        </div>
+        <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
+          Set minimum ambient low and maximum peak spike (e.g. <b>70% to 98%</b>):
+        </div>
+
+        <!-- Live Range Gauge Visualizer Bar -->
+        <div style="position:relative; width:100%; height:14px; background:#111827; border-radius:7px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
+          <div id="range-active-window" style="position:absolute; left:0%; width:100%; height:100%; background:linear-gradient(90deg, rgba(56,189,248,0.3), rgba(236,72,153,0.4)); border-left:2px solid #38bdf8; border-right:2px solid #ec4899;"></div>
+          <div id="range-needle" style="position:absolute; left:0%; top:0; width:4px; height:100%; background:#fff; box-shadow:0 0 8px #fff; transition:left 0.04s ease;"></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="slider-box">
+            <div class="slider-header">
+              <span>Low Floor:</span>
+              <b id="range-floor-display" style="color:#38bdf8;">0%</b>
+            </div>
+            <input type="range" id="range-floor-slider" min="0" max="90" value="0" step="1" oninput="onRangeFloorChange(this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-header">
+              <span>High Ceiling:</span>
+              <b id="range-ceiling-display" style="color:#ec4899;">100%</b>
+            </div>
+            <input type="range" id="range-ceiling-slider" min="40" max="100" value="100" step="1" oninput="onRangeCeilingChange(this.value)">
+          </div>
+        </div>
+
+        <!-- 1-Tap Quick Range Presets -->
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+          <span class="genre-chip active" id="range-chip-full" onclick="setRangePreset(0, 100)">Full Range (0% - 100%)</span>
+          <span class="genre-chip" id="range-chip-user" onclick="setRangePreset(70, 98)">⭐ Custom (70% - 98%)</span>
+          <span class="genre-chip" id="range-chip-night" onclick="setRangePreset(40, 85)">🌙 Night (40% - 85%)</span>
+          <span class="genre-chip" id="range-chip-club" onclick="setRangePreset(20, 100)">⚡ Club (20% - 100%)</span>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:0.7rem; color:var(--subtext);">
+          <span>Maintain floor glow during song pause:</span>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="chk-keep-floor-silence" onchange="onKeepFloorSilenceChange(this.checked)">
+            <span style="color:var(--text);">Keep Ambient Floor</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- ⚡ 3. 3-STAGE SPIKE DYNAMICS (BEFORE, DURING, AFTER) -->
+      <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div style="font-weight:700; color:#fbbf24; font-size:0.75rem; margin-bottom:4px;">
+          ⚡ 3-Stage Spike Dynamics (Before, During & After Reaction)
+        </div>
+        <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
+          Tension build-up radar, climax explosive strike, and customizable harmonic decay:
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px; font-size:0.72rem; margin-bottom:8px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="chk-spike-anticipation" checked onchange="onSpikeAnticipationChange(this.checked)">
+            <span style="color:#fde68a;"><b>Stage 1 (Before Spike):</b> Tension Radar Shimmer (Pre-drop build-up pulse)</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="chk-spike-white-strobe" checked onchange="onSpikeWhiteStrobeChange(this.checked)">
+            <span style="color:#ffffff;"><b>Stage 2 (During Spike):</b> Climax Impact (Crisp white kick flash on heavy hits)</span>
+          </label>
+        </div>
+
+        <div style="font-size:0.7rem; color:#cbd5e1; font-weight:700; margin-bottom:4px;">
+          Stage 3 (After Spike Reaction - Reverb Tail Curve):
+        </div>
+        <div class="genre-chips" style="margin-top:2px;">
+          <span class="genre-chip active" id="spike-curve-harmonic" onclick="setSpikeCurve('harmonic')">🌊 Harmonic Reverb</span>
+          <span class="genre-chip" id="spike-curve-snappy" onclick="setSpikeCurve('snappy')">⚡ Cyber Snappy</span>
+          <span class="genre-chip" id="spike-curve-ripple" onclick="setSpikeCurve('ripple')">💫 Twin Echo Ripple</span>
+          <span class="genre-chip" id="spike-curve-bloom" onclick="setSpikeCurve('bloom')">🌸 Vocal Bloom</span>
+        </div>
+      </div>
+
+      <!-- 🌈 4. CHROMA PITCH STUDIO (CUSTOMIZABLE PITCH DETECTION) -->
+      <div style="padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:700; color:#a78bfa; font-size:0.75rem;">🌈 Chroma Pitch Studio (Custom Musical Tuning)</span>
+          <span id="chroma-note-live" class="status-pill" style="background:rgba(167,139,250,0.2); color:#c4b5fd; border-color:rgba(167,139,250,0.4); font-size:0.68rem;">🎵 A4 • 440 Hz</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
+          Maps every note & singer pitch directly to your custom harmonic color wheel:
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
+          <div class="slider-box">
+            <div class="slider-header">
+              <span>Root Hue Offset:</span>
+              <b id="chroma-offset-display" style="color:#c4b5fd;">0° (C = Red)</b>
+            </div>
+            <input type="range" id="chroma-offset-slider" min="0" max="360" value="0" step="5" oninput="onChromaOffsetChange(this.value)">
+          </div>
+          <div class="slider-box">
+            <div class="slider-header">
+              <span>Octave Spread:</span>
+              <b id="chroma-spread-display" style="color:#c4b5fd;">1.0x Normal</b>
+            </div>
+            <input type="range" id="chroma-spread-slider" min="5" max="25" value="10" step="1" oninput="onChromaSpreadChange(this.value)">
+          </div>
+        </div>
+
+        <div style="font-size:0.7rem; color:#cbd5e1; font-weight:700; margin-bottom:4px;">
+          Chroma Color Palette Themes:
+        </div>
+        <div class="genre-chips" style="margin-top:2px;">
+          <span class="genre-chip active" id="chroma-pal-spectrum" onclick="setChromaPalette('spectrum')">🌈 Full 360° Spectrum</span>
+          <span class="genre-chip" id="chroma-pal-cyber" onclick="setChromaPalette('cyber')">🌆 Cyber Neon</span>
+          <span class="genre-chip" id="chroma-pal-sunset" onclick="setChromaPalette('sunset')">🌅 Sunset Heat</span>
+          <span class="genre-chip" id="chroma-pal-fifths" onclick="setChromaPalette('fifths')">🎼 Circle of Fifths</span>
         </div>
       </div>
     </div>
@@ -975,7 +1129,195 @@
   }
 
   // ====================================================================
-  // 🎨 12 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR
+  // 🎛️ VOCAL WEIGHT, DYNAMIC RANGE, SPIKE DYNAMICS & CHROMA STUDIO STATE
+  // ====================================================================
+  let vocalWeight = 1.8;
+  let isVocalSpotlight = false;
+
+  let brightnessFloor = 0;       // 0% to 90%
+  let brightnessCeiling = 100;    // 40% to 100%
+  let keepFloorOnSilence = false;
+
+  let enableSpikeAnticipation = true;
+  let enableSpikeWhiteStrobe = true;
+  let activeSpikeCurve = 'harmonic'; // 'harmonic', 'snappy', 'ripple', 'bloom'
+
+  let chromaRootOffset = 0;       // 0° to 360°
+  let chromaOctaveSpread = 1.0;   // 0.5x to 2.5x
+  let activeChromaPalette = 'spectrum'; // 'spectrum', 'cyber', 'sunset', 'fifths'
+  let detectedPitchNote = '--';
+  let detectedPitchFreq = 0;
+  let detectedPitchMidi = 60;
+  let detectedPitchNoteIndex = 0;
+
+  // Auto Feeling AI Vibe Engine State
+  let detectedFeeling = 'Chill Lo-Fi';
+  let energyHistory = [];
+  let vocalHistory = [];
+  let kickHistory = [];
+
+  // Studio Handlers: Vocal Weight & Spotlight
+  function onVocalWeightChange(val) {
+    vocalWeight = parseFloat(val) / 10.0;
+    let disp = document.getElementById('vocal-weight-display');
+    if (disp) disp.textContent = vocalWeight.toFixed(1) + 'x ' + (vocalWeight > 2.0 ? '(Heavy Voice)' : (vocalWeight < 1.0 ? '(Subtle Voice)' : '(Punchy Vocals)'));
+  }
+
+  function onVocalSpotlightChange(checked) {
+    isVocalSpotlight = checked;
+  }
+
+  // Studio Handlers: Dynamic Range (Floor & Ceiling)
+  function updateRangeWindowUI() {
+    let activeWin = document.getElementById('range-active-window');
+    if (activeWin) {
+      let f = brightnessFloor;
+      let w = Math.max(2, brightnessCeiling - brightnessFloor);
+      activeWin.style.left = f + '%';
+      activeWin.style.width = w + '%';
+    }
+    let summary = document.getElementById('range-summary-display');
+    if (summary) summary.textContent = `${brightnessFloor}% - ${brightnessCeiling}%`;
+    let flDisp = document.getElementById('range-floor-display');
+    if (flDisp) flDisp.textContent = `${brightnessFloor}%`;
+    let clDisp = document.getElementById('range-ceiling-display');
+    if (clDisp) clDisp.textContent = `${brightnessCeiling}%`;
+    let flSlider = document.getElementById('range-floor-slider');
+    if (flSlider) flSlider.value = brightnessFloor;
+    let clSlider = document.getElementById('range-ceiling-slider');
+    if (clSlider) clSlider.value = brightnessCeiling;
+  }
+
+  function onRangeFloorChange(val) {
+    brightnessFloor = parseInt(val);
+    if (brightnessFloor >= brightnessCeiling) {
+      brightnessCeiling = Math.min(100, brightnessFloor + 5);
+    }
+    updateRangeWindowUI();
+  }
+
+  function onRangeCeilingChange(val) {
+    brightnessCeiling = parseInt(val);
+    if (brightnessCeiling <= brightnessFloor) {
+      brightnessFloor = Math.max(0, brightnessCeiling - 5);
+    }
+    updateRangeWindowUI();
+  }
+
+  function setRangePreset(floorVal, ceilVal) {
+    brightnessFloor = floorVal;
+    brightnessCeiling = ceilVal;
+    document.querySelectorAll('[id^="range-chip-"]').forEach(c => c.classList.remove('active'));
+    if (floorVal === 0 && ceilVal === 100) document.getElementById('range-chip-full')?.classList.add('active');
+    else if (floorVal === 70 && ceilVal === 98) document.getElementById('range-chip-user')?.classList.add('active');
+    else if (floorVal === 40 && ceilVal === 85) document.getElementById('range-chip-night')?.classList.add('active');
+    else if (floorVal === 20 && ceilVal === 100) document.getElementById('range-chip-club')?.classList.add('active');
+    updateRangeWindowUI();
+  }
+
+  function onKeepFloorSilenceChange(checked) {
+    keepFloorOnSilence = checked;
+  }
+
+  function updateRangeNeedle(finalIntensity) {
+    let needle = document.getElementById('range-needle');
+    if (needle) {
+      let pct = Math.min(100, Math.max(0, (finalIntensity / 255.0) * 100));
+      needle.style.left = pct + '%';
+    }
+  }
+
+  function applyBrightnessRange(rawIntensity, isSilent = false) {
+    if (isSilent) {
+      if (!keepFloorOnSilence) return 0;
+      return Math.round((brightnessFloor / 100.0) * 255.0);
+    }
+    let f = (brightnessFloor / 100.0) * 255.0;
+    let c = (brightnessCeiling / 100.0) * 255.0;
+    if (c <= f) c = Math.min(255, f + 1);
+    let scaled = f + (rawIntensity / 255.0) * (c - f);
+    return Math.min(255, Math.max(0, Math.round(scaled)));
+  }
+
+  // Studio Handlers: 3-Stage Spike Dynamics
+  function onSpikeAnticipationChange(checked) {
+    enableSpikeAnticipation = checked;
+  }
+
+  function onSpikeWhiteStrobeChange(checked) {
+    enableSpikeWhiteStrobe = checked;
+  }
+
+  function setSpikeCurve(curve) {
+    activeSpikeCurve = curve;
+    document.querySelectorAll('[id^="spike-curve-"]').forEach(c => c.classList.remove('active'));
+    document.getElementById('spike-curve-' + curve)?.classList.add('active');
+  }
+
+  // Studio Handlers: Chroma Pitch Studio
+  function onChromaOffsetChange(val) {
+    chromaRootOffset = parseInt(val);
+    let disp = document.getElementById('chroma-offset-display');
+    const noteMap = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    let nIdx = Math.round((chromaRootOffset / 30) % 12);
+    if (disp) disp.textContent = `${chromaRootOffset}° (${noteMap[nIdx]} Base)`;
+  }
+
+  function onChromaSpreadChange(val) {
+    chromaOctaveSpread = parseFloat(val) / 10.0;
+    let disp = document.getElementById('chroma-spread-display');
+    if (disp) disp.textContent = chromaOctaveSpread.toFixed(1) + 'x Spread';
+  }
+
+  function setChromaPalette(pal) {
+    activeChromaPalette = pal;
+    document.querySelectorAll('[id^="chroma-pal-"]').forEach(c => c.classList.remove('active'));
+    document.getElementById('chroma-pal-' + pal)?.classList.add('active');
+  }
+
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  function detectPitch(dataArray, sampleRate) {
+    let maxVal = 0, maxBin = 0;
+    for (let i = 1; i <= 45; i++) {
+      if (dataArray[i] > maxVal) {
+        maxVal = dataArray[i];
+        maxBin = i;
+      }
+    }
+    if (maxVal < 25) return { note: '--', freq: 0, midi: 60, noteIndex: 0 };
+    let binWidth = sampleRate / 256.0;
+    let freq = Math.round(maxBin * binWidth);
+    if (freq < 55) freq = 55;
+    let midi = Math.round(12 * Math.log2(freq / 440) + 69);
+    let noteIndex = (midi % 12 + 12) % 12;
+    let noteName = NOTE_NAMES[noteIndex];
+    let octave = Math.floor(midi / 12) - 1;
+    return { note: `${noteName}${octave}`, freq, midi, noteIndex };
+  }
+
+  function getChromaColor(midi, noteIdx) {
+    let p = activeChromaPalette;
+    let idx = (noteIdx !== undefined && noteIdx >= 0) ? noteIdx : (midi % 12 + 12) % 12;
+    if (p === 'spectrum') {
+      let hue = Math.round((idx * 30 * chromaOctaveSpread + chromaRootOffset) % 360 + 360) % 360;
+      return hsvToRgb(hue, 1.0, 1.0);
+    } else if (p === 'cyber') {
+      const cyberHues = [325, 340, 185, 200, 275, 290, 325, 340, 185, 200, 275, 290];
+      let hue = Math.round((cyberHues[idx] + chromaRootOffset) % 360 + 360) % 360;
+      return hsvToRgb(hue, 1.0, 1.0);
+    } else if (p === 'sunset') {
+      const sunsetHues = [5, 18, 30, 42, 54, 5, 18, 30, 42, 54, 345, 355];
+      let hue = Math.round((sunsetHues[idx] + chromaRootOffset) % 360 + 360) % 360;
+      return hsvToRgb(hue, 1.0, 1.0);
+    } else if (p === 'fifths') {
+      let hue = Math.round((((idx * 7) % 12) * 30 * chromaOctaveSpread + chromaRootOffset) % 360 + 360) % 360;
+      return hsvToRgb(hue, 1.0, 1.0);
+    }
+    return [0, 245, 255];
+  }
+
+  // ====================================================================
+  // 🎨 13 DIVERSE MUSIC LIGHT MODES + FREE CUSTOM COLOR
   // ====================================================================
   let activeMusicMode = 'cyber';
   let modeHue = 320;
@@ -1016,11 +1358,31 @@
     return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
   }
 
-  function getMusicModeColor(isHeavy, kick, mids, treble) {
+  function getMusicModeColor(isHeavy, kick, vocals, mids, treble) {
     modeBeatCount++;
     let m = activeMusicMode;
 
-    if (m === 'cyber') {
+    if (m === 'autofeeling') {
+      // 🎭 AUTO FEELING AI ENGINE: Dynamically adapts to song vibe!
+      if (detectedFeeling === 'Vocal Ballad') {
+        let h = (modeBeatCount % 6 < 3) ? 345 : 38; // Rose Gold / Warm Amber
+        return hsvToRgb(h, 0.95, 1.0);
+      } else if (detectedFeeling === 'EDM Festival') {
+        return isHeavy ? [255, 255, 255] : [0, 245, 255]; // Pure Strobe / Electric Cyan
+      } else if (detectedFeeling === 'Trap 808 Bass') {
+        let h = (modeBeatCount % 6 < 3) ? 280 : 0; // Deep Violet / Blood Red
+        return hsvToRgb(h, 1.0, 1.0);
+      } else if (detectedFeeling === 'Chill Lo-Fi') {
+        let h = (modeBeatCount % 6 < 3) ? 260 : 165; // Lavender / Seafoam
+        return hsvToRgb(h, 0.70, 0.95);
+      } else if (detectedFeeling === 'Funk Groove') {
+        let h = (modeBeatCount % 6 < 3) ? 42 : 95; // Golden Groove / Electric Lime
+        return hsvToRgb(h, 1.0, 1.0);
+      } else {
+        // Cinematic Suspense
+        return isHeavy ? [255, 255, 255] : [220, 20, 50]; // Lightning Flash / Dark Crimson
+      }
+    } else if (m === 'cyber') {
       let h = (modeBeatCount % 8 < 4) ? 325 : 190; // Pink / Cyan
       return hsvToRgb(h, 1.0, 1.0);
     } else if (m === 'fire') {
@@ -1036,9 +1398,8 @@
       let h = (modeBeatCount % 6 < 3) ? 275 : 160; // Violet / Seafoam
       return hsvToRgb(h, 0.75, 1.0);
     } else if (m === 'pitch') {
-      // Direct pitch mapping: Bass=Red(0), Mids=Green(120), Treble=Blue(240)
-      let pitchHue = (kick * 0 + mids * 1.0 + treble * 2.2) % 360;
-      return hsvToRgb(pitchHue, 1.0, 1.0);
+      // 🌈 CUSTOMIZABLE CHROMA PITCH ENGINE
+      return getChromaColor(detectedPitchMidi, detectedPitchNoteIndex);
     } else if (m === 'ocean') {
       let h = (modeBeatCount % 8 < 4) ? 215 : 175; // Navy / Teal
       return hsvToRgb(h, 0.95, 1.0);
@@ -1105,14 +1466,16 @@
   }
   requestAnimationFrame(drawIdleWave);
 
-  // Meter smooth falloff helper
-  let displayBass = 0, displayMids = 0, displayTreb = 0;
-  function updateMeters(k, m, t) {
+  // 4-Band Multi-Instrument Meter smooth falloff helper
+  let displayBass = 0, displayVocals = 0, displayMids = 0, displayTreb = 0;
+  function updateMeters(k, v, m, t) {
     displayBass = Math.max(k, displayBass * 0.85);
+    displayVocals = Math.max(v, displayVocals * 0.85);
     displayMids = Math.max(m, displayMids * 0.85);
     displayTreb = Math.max(t, displayTreb * 0.85);
 
     let pb = Math.round((displayBass / 255) * 100);
+    let pv = Math.round((displayVocals / 255) * 100);
     let pm = Math.round((displayMids / 255) * 100);
     let pt = Math.round((displayTreb / 255) * 100);
 
@@ -1120,6 +1483,11 @@
     if (mb) mb.style.width = pb + '%';
     let vb = document.getElementById('val-bass');
     if (vb) vb.textContent = pb + '%';
+
+    let mv = document.getElementById('meter-vocals');
+    if (mv) mv.style.width = pv + '%';
+    let vv = document.getElementById('val-vocals');
+    if (vv) vv.textContent = pv + '%';
 
     let mm = document.getElementById('meter-mids');
     if (mm) mm.style.width = pm + '%';
@@ -1184,8 +1552,19 @@
     }
     setStatusPill('● Stopped');
 
-    updateMeters(0, 0, 0);
+    updateMeters(0, 0, 0, 0);
     updateVirtualLed(0, 0, 0, 0);
+    updateRangeNeedle(0);
+    let pitchNoteEl = document.getElementById('live-pitch-note');
+    if (pitchNoteEl) pitchNoteEl.textContent = '🎵 Note: --';
+    let feelingBadge = document.getElementById('auto-feeling-badge');
+    if (feelingBadge) feelingBadge.textContent = '🎭 Vibe: Idle';
+    let spikeBadge = document.getElementById('spike-phase-badge');
+    if (spikeBadge) {
+      spikeBadge.textContent = '⚡ Spike: Normal';
+      spikeBadge.style.color = '#a5b4fc';
+    }
+
     sendDynamicBeat(0, 0, 0, 0, 80);
     requestAnimationFrame(drawIdleWave);
   }
@@ -1315,9 +1694,11 @@
       return;
     }
 
-    let [r, g, b] = getMusicModeColor(isHeavyKick, isHeavyKick ? 200 : 80, 100, 100);
-    let intensity = isHeavyKick ? 255 : 220;
+    let [r, g, b] = getMusicModeColor(isHeavyKick, isHeavyKick ? 200 : 80, 120, 100, 100);
+    let rawIntensity = isHeavyKick ? 255 : 220;
+    let intensity = applyBrightnessRange(rawIntensity, false);
     let decay = isHeavyKick ? activeDecay : Math.round(activeDecay * 0.8);
+    updateRangeNeedle(intensity);
 
     if (isHeavyKick) {
       if (!document.hidden) {
@@ -1361,7 +1742,8 @@
     let midsEnergy = Math.round(150 * Math.sin(phase * Math.PI));
     let trebEnergy = Math.round(180 * Math.max(0, Math.sin(phase * Math.PI * 4)));
 
-    updateMeters(kickEnergy, midsEnergy, trebEnergy);
+    let vocalEnergy = Math.round(midsEnergy * 0.9);
+    updateMeters(kickEnergy, vocalEnergy, midsEnergy, trebEnergy);
 
     // Draw Dynamic Spectrum Bars
     canvasCtx.fillStyle = '#05070c';
@@ -1391,7 +1773,7 @@
     if (tapHistory.length > 0 && now - tapHistory[tapHistory.length - 1] > 2500) tapHistory = [];
     tapHistory.push(now);
 
-    let [r, g, b] = getMusicModeColor(true, 220, 100, 100);
+    let [r, g, b] = getMusicModeColor(true, 220, 150, 100, 100);
     updateVirtualLed(r, g, b, 255);
     sendDynamicBeat(r, g, b, 255, 450);
     playClickAudio(true);
@@ -1787,15 +2169,27 @@
     let dataArray = new Uint8Array(bufLen);
     analyser.getByteFrequencyData(dataArray);
 
-    // Multi-Band Extraction:
-    // Sub-bass & Kicks (Bins 0-3: ~0-280 Hz, includes kick foundation)
+    // 1. 4-Band Multi-Instrument Extraction:
+    // Sub-bass & Kicks (Bins 0-3: ~0-280 Hz)
     let kick = (dataArray[0] + dataArray[1] + dataArray[2] + dataArray[3]) / 4;
-    // Lower & Mid Range - Snares, Vocals, Rhythm Synths (Bins 4-16: ~300-1100 Hz)
-    let mids = 0; for (let i = 4; i <= 16; i++) mids += dataArray[i]; mids /= 13;
-    // Highs & Treble - Cymbals, Hi-Hats, Sparkles (Bins 17-50: ~1200-3800 Hz)
-    let treble = 0; for (let i = 17; i <= 50; i++) treble += dataArray[i]; treble /= 34;
 
-    let totalEnergy = (kick * 1.4 + mids * 1.1 + treble * 0.8) / 3.3;
+    // Lead Vocals & Voice Formants (Bins 3-18: ~300-1400 Hz)
+    let vocalSum = 0;
+    for (let i = 3; i <= 18; i++) vocalSum += dataArray[i];
+    let vocalRaw = vocalSum / 16;
+    let vocals = Math.min(255, Math.round(vocalRaw * vocalWeight));
+
+    // Rhythm, Chords & Synths (Bins 6-22: ~500-1900 Hz)
+    let midsSum = 0;
+    for (let i = 6; i <= 22; i++) midsSum += dataArray[i];
+    let mids = midsSum / 17;
+
+    // Highs, Cymbals, Snares & Hi-Hats (Bins 23-50: ~2000-4300 Hz)
+    let trebSum = 0;
+    for (let i = 23; i <= 50; i++) trebSum += dataArray[i];
+    let treble = trebSum / 28;
+
+    let totalEnergy = (kick * 1.3 + vocals * 1.2 + mids * 1.0 + treble * 0.8) / 4.3;
 
     // Dynamic Automatic Gain Control (AGC) - Adapts to low or high Spotify volume
     maxKickObserved = Math.max(kick, maxKickObserved * 0.996);
@@ -1807,28 +2201,79 @@
     avgKickEnvelope = avgKickEnvelope * 0.90 + kick * 0.10;
     avgMidEnvelope = avgMidEnvelope * 0.90 + mids * 0.10;
 
+    // 2. Real-Time Musical Note & Pitch Detection
+    let pitchInfo = detectPitch(dataArray, audioCtx ? audioCtx.sampleRate : 44100);
+    detectedPitchNote = pitchInfo.note;
+    detectedPitchFreq = pitchInfo.freq;
+    detectedPitchMidi = pitchInfo.midi;
+    detectedPitchNoteIndex = pitchInfo.noteIndex;
+
     let now = Date.now();
     let badge = document.getElementById('beat-status-badge');
+    let spikePhaseBadge = document.getElementById('spike-phase-badge');
 
-    // 🛑 1. TRUE DIGITAL SILENCE / SPOTIFY PAUSE DETECTION
+    if (!isBackground) {
+      let livePitchEl = document.getElementById('live-pitch-note');
+      if (livePitchEl) livePitchEl.textContent = `🎵 ${detectedPitchNote} (${detectedPitchFreq}Hz)`;
+      let chromaNoteLive = document.getElementById('chroma-note-live');
+      if (chromaNoteLive) chromaNoteLive.textContent = `🎵 ${detectedPitchNote} • ${detectedPitchFreq} Hz`;
+    }
+
+    // 3. Auto Feeling AI Vibe Classification (Rolling Window)
+    energyHistory.push(totalEnergy);
+    vocalHistory.push(vocals);
+    kickHistory.push(kick);
+    if (energyHistory.length > 50) energyHistory.shift();
+    if (vocalHistory.length > 50) vocalHistory.shift();
+    if (kickHistory.length > 50) kickHistory.shift();
+
+    let avgE = energyHistory.reduce((a, b) => a + b, 0) / energyHistory.length;
+    let avgV = vocalHistory.reduce((a, b) => a + b, 0) / vocalHistory.length;
+    let avgK = kickHistory.reduce((a, b) => a + b, 0) / kickHistory.length;
+    let varE = energyHistory.reduce((a, b) => a + Math.pow(b - avgE, 2), 0) / energyHistory.length;
+
+    if (avgV > 38 && avgV > avgK * 1.15) {
+      detectedFeeling = 'Vocal Ballad';
+    } else if (varE > 320 && avgK > 48) {
+      detectedFeeling = 'EDM Festival';
+    } else if (avgK > 55 && avgK > avgV * 1.25) {
+      detectedFeeling = 'Trap 808 Bass';
+    } else if (avgE < 28 && varE < 75) {
+      detectedFeeling = 'Chill Lo-Fi';
+    } else if (mids > 40 && kick > 25) {
+      detectedFeeling = 'Funk Groove';
+    } else {
+      detectedFeeling = 'Cinematic Suspense';
+    }
+
+    let feelingBadge = document.getElementById('auto-feeling-badge');
+    if (feelingBadge && !isBackground) feelingBadge.textContent = `🎭 ${detectedFeeling}`;
+
+    // 🛑 4. TRUE DIGITAL SILENCE / SPOTIFY PAUSE DETECTION
     if (totalEnergy < 2.5) {
       silenceFrames++;
       if (silenceFrames >= 20) {
+        let finalSilence = applyBrightnessRange(0, true);
         if (!isBackground) {
-          updateMeters(0, 0, 0);
+          updateMeters(0, 0, 0, 0);
           drawPausedSpectrum(canvasCtx, canvas);
           if (badge) {
             badge.className = 'beat-badge drop';
-            badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+            badge.textContent = keepFloorOnSilence ? '⏸️ SPOTIFY PAUSED (FLOOR AMBIENT)' : '⏸️ SPOTIFY PAUSED (LED OFF)';
           }
-          updateVirtualLed(0, 0, 0, 0);
+          if (spikePhaseBadge) {
+            spikePhaseBadge.textContent = '⚡ Spike: Idle';
+            spikePhaseBadge.style.color = '#94a3b8';
+          }
+          updateVirtualLed(0, 0, 0, finalSilence);
+          updateRangeNeedle(finalSilence);
         } else {
           document.title = '⏸️ [PAUSED] ESP32 RGB PRO';
         }
 
         if (!isCurrentlySilent) {
           isCurrentlySilent = true;
-          dispatchDynamicBeat(0, 0, 0, 0, 60);
+          dispatchDynamicBeat(0, 0, 0, finalSilence, 60);
         }
         return;
       }
@@ -1837,7 +2282,7 @@
       isCurrentlySilent = false;
     }
 
-    // 2. DRAW ACTIVE SPECTRUM (Only draw when tab is visible to conserve GPU/battery in background!)
+    // 5. DRAW ACTIVE SPECTRUM BARS (When tab visible)
     if (!isBackground) {
       canvasCtx.fillStyle = '#05070c';
       canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1849,28 +2294,50 @@
         canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
         x += barWidth + 1.2;
       }
-      updateMeters(kick, mids, treble);
+      updateMeters(kick, vocals, mids, treble);
     }
 
     recentEnergy.push(totalEnergy);
     if (recentEnergy.length > 25) recentEnergy.shift();
     let avgRecent = recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length;
 
-    // 3. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
+    // 6. STAGE 1 (BEFORE SPIKE): TENSION PRE-DROP RADAR
+    let energyDelta = totalEnergy - avgRecent;
+    if (enableSpikeAnticipation && energyDelta > 14 && totalEnergy > 26 && (now - lastBeatTimestamp > 110)) {
+      if (spikePhaseBadge && !isBackground) {
+        spikePhaseBadge.textContent = '⚡ Stage 1: Tension Radar (Pre-Drop)';
+        spikePhaseBadge.style.color = '#fde68a';
+      }
+      let preIntensity = applyBrightnessRange(Math.min(130, Math.round(totalEnergy * 1.4)), false);
+      let [pr, pg, pb] = getMusicModeColor(false, kick, vocals, mids, treble);
+      dispatchDynamicBeat(pr, pg, pb, preIntensity, 110);
+      if (!isBackground) {
+        updateVirtualLed(pr, pg, pb, preIntensity);
+        updateRangeNeedle(preIntensity);
+      }
+    }
+
+    // 7. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
     let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 25);
     if (isDrop) {
+      let finalDrop = applyBrightnessRange(0, false);
       if (!isBackground) {
         if (badge) {
           badge.className = 'beat-badge drop';
           badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
         }
-        updateVirtualLed(0, 0, 0, 0);
+        if (spikePhaseBadge) {
+          spikePhaseBadge.textContent = '🤫 Drop Blackout';
+          spikePhaseBadge.style.color = '#94a3b8';
+        }
+        updateVirtualLed(0, 0, 0, finalDrop);
+        updateRangeNeedle(finalDrop);
       } else {
         document.title = '🤫 [DROP] ESP32 RGB PRO';
       }
-      dispatchDynamicBeat(0, 0, 0, 0, 70);
+      dispatchDynamicBeat(0, 0, 0, finalDrop, 70);
     }
-    // 4. MULTI-LEVEL DYNAMIC BEAT DETECTION (Low Beats, Snares, and Heavy Kicks)
+    // 8. MULTI-LEVEL DYNAMIC BEAT & SPIKE DETECTION (Low Beats, Snares, Vocals, and Heavy Kicks)
     else {
       let kickRatio = kick / Math.max(2, avgKickEnvelope);
       let midRatio = mids / Math.max(2, avgMidEnvelope);
@@ -1883,77 +2350,121 @@
       // Detection tests:
       let isHeavyKick = (kickRatio > (1.18 / sens) && kick > 12) || (normKick > 0.72);
       let isSnareClap = !isHeavyKick && ((midRatio > (1.14 / sens) && mids > 10) || (normMid > 0.65));
-      let isLowBeat   = !isHeavyKick && !isSnareClap && ((kickRatio > (1.05 / sens) && kick > 6) || (normKick > 0.28 && (now - lastBeatTimestamp > 140)));
+      let isVocalLeadHit = !isHeavyKick && !isSnareClap && isVocalSpotlight && (vocals > 45 && vocals > kick * 1.1);
+      let isLowBeat   = !isHeavyKick && !isSnareClap && !isVocalLeadHit && ((kickRatio > (1.05 / sens) && kick > 6) || (normKick > 0.28 && (now - lastBeatTimestamp > 140)));
 
-      let beatHit = isHeavyKick || isSnareClap || isLowBeat;
+      let beatHit = isHeavyKick || isSnareClap || isVocalLeadHit || isLowBeat;
       let minGap = isHeavyKick ? 90 : (isSnareClap ? 70 : 50);
 
       if (beatHit && (now - lastBeatTimestamp > minGap)) {
         lastBeatTimestamp = now;
 
-        let intensity = 0;
+        let rawIntensity = 0;
         let decayMs = 0;
         let [r, g, b] = [255, 255, 255];
 
         if (isHeavyKick) {
-          // 🔥 HEAVY BEAT: Bright punch (210 to 255 brightness)
-          intensity = Math.round(210 + normKick * 45);
-          decayMs = activeDecay;
-          [r, g, b] = getMusicModeColor(true, kick, mids, treble);
-          if (!isBackground) {
-            if (badge) {
-              badge.className = 'beat-badge peak';
-              badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
-            }
+          // 🔥 STAGE 2 (DURING SPIKE): Explosive Impact
+          rawIntensity = Math.round(210 + normKick * 45);
+          if (enableSpikeWhiteStrobe) {
+            [r, g, b] = [255, 255, 255]; // Crisp white flash on peak kick drop
+          } else {
+            [r, g, b] = getMusicModeColor(true, kick, vocals, mids, treble);
+          }
+          if (spikePhaseBadge && !isBackground) {
+            spikePhaseBadge.textContent = '💥 Stage 2: Climax Spike Impact!';
+            spikePhaseBadge.style.color = '#ef4444';
+          }
+          if (!isBackground && badge) {
+            badge.className = 'beat-badge peak';
+            badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${rawIntensity})`;
           } else {
             document.title = '🔥 [BEAT] ESP32 RGB PRO';
           }
+        } else if (isVocalLeadHit) {
+          // 🎙️ VOCALIST SPOTLIGHT HIT
+          rawIntensity = Math.round(170 + (vocals / 255.0) * 80);
+          [r, g, b] = [244, 63, 94]; // Rose singer spotlight
+          if (spikePhaseBadge && !isBackground) {
+            spikePhaseBadge.textContent = '🎤 Stage 2: Vocalist Spotlight Hit';
+            spikePhaseBadge.style.color = '#f472b6';
+          }
+          if (!isBackground && badge) {
+            badge.className = 'beat-badge normal';
+            badge.textContent = `🎙️ LEAD VOCAL (Bloom ${rawIntensity})`;
+          } else {
+            document.title = '🎤 [VOCAL] ESP32 RGB PRO';
+          }
         } else if (isSnareClap) {
-          // 🥁 SNARE / RHYTHM: Crisp, snappy strike (140 to 200 brightness)
-          intensity = Math.round(140 + normMid * 60);
-          decayMs = Math.round(activeDecay * 0.75);
-          [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          if (!isBackground) {
-            if (badge) {
-              badge.className = 'beat-badge normal';
-              badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
-            }
+          // 🥁 SNARE / RHYTHM: Crisp, snappy strike
+          rawIntensity = Math.round(140 + normMid * 60);
+          [r, g, b] = getMusicModeColor(false, kick, vocals, mids, treble);
+          if (spikePhaseBadge && !isBackground) {
+            spikePhaseBadge.textContent = '⚡ Stage 2: Snare / Clap Hit';
+            spikePhaseBadge.style.color = '#38bdf8';
+          }
+          if (!isBackground && badge) {
+            badge.className = 'beat-badge normal';
+            badge.textContent = `🥁 SNARE / CLAP (Power ${rawIntensity})`;
           } else {
             document.title = '✨ [SNARE] ESP32 RGB PRO';
           }
         } else {
-          // 🫧 LOW / SOFT BEAT: Subtle mellow glow (75 to 135 brightness)
-          intensity = Math.round(75 + normKick * 60);
-          decayMs = Math.round(activeDecay * 0.60);
-          [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          if (!isBackground) {
-            if (badge) {
-              badge.className = 'beat-badge normal';
-              badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
-            }
+          // 🫧 LOW / SOFT BEAT: Subtle mellow groove
+          rawIntensity = Math.round(75 + normKick * 60);
+          [r, g, b] = getMusicModeColor(false, kick, vocals, mids, treble);
+          if (spikePhaseBadge && !isBackground) {
+            spikePhaseBadge.textContent = '🫧 Stage 2: Groove Rhythm';
+            spikePhaseBadge.style.color = '#a5b4fc';
+          }
+          if (!isBackground && badge) {
+            badge.className = 'beat-badge normal';
+            badge.textContent = `🫧 GROOVE BEAT (Glow ${rawIntensity})`;
           } else {
             document.title = '🎵 [GROOVE] ESP32 RGB PRO';
           }
         }
 
+        // STAGE 3 (AFTER SPIKE): Customizable Harmonic Reverb Tail
+        if (activeSpikeCurve === 'harmonic') {
+          decayMs = Math.round(activeDecay * 1.15); // Smooth analog fade
+        } else if (activeSpikeCurve === 'snappy') {
+          decayMs = Math.round(activeDecay * 0.55); // Rapid club drop-off
+        } else if (activeSpikeCurve === 'ripple') {
+          decayMs = Math.round(activeDecay * 0.80);
+          // Secondary echo ripple bounce
+          let rippleIntensity = applyBrightnessRange(Math.round(rawIntensity * 0.55), false);
+          setTimeout(() => {
+            dispatchDynamicBeat(r, g, b, rippleIntensity, 180);
+          }, 130);
+        } else if (activeSpikeCurve === 'bloom') {
+          decayMs = Math.round(activeDecay * 1.45); // Lingering vocal bloom
+        }
+
+        // Apply User's Custom Brightness Range [Floor% - Ceiling%]
+        let finalIntensity = applyBrightnessRange(rawIntensity, false);
+
         if (!isBackground) {
-          updateVirtualLed(r, g, b, intensity);
+          updateVirtualLed(r, g, b, finalIntensity);
+          updateRangeNeedle(finalIntensity);
         }
 
         if (syncOffsetMs > 0) {
-          setTimeout(() => { dispatchDynamicBeat(r, g, b, intensity, decayMs); }, syncOffsetMs);
+          setTimeout(() => { dispatchDynamicBeat(r, g, b, finalIntensity, decayMs); }, syncOffsetMs);
         } else {
-          dispatchDynamicBeat(r, g, b, intensity, decayMs);
+          dispatchDynamicBeat(r, g, b, finalIntensity, decayMs);
         }
       } else if (now - lastBeatTimestamp > 180 && totalEnergy > 6) {
         // Continuous ambient musical breathing pulse so LED stays alive during musical flow
         lastBeatTimestamp = now;
-        let [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-        let ambientIntensity = Math.min(65, Math.max(30, Math.round(totalEnergy * 0.8)));
+        let [r, g, b] = getMusicModeColor(false, kick, vocals, mids, treble);
+        let ambientRaw = Math.min(65, Math.max(30, Math.round(totalEnergy * 0.8)));
+        let finalAmbient = applyBrightnessRange(ambientRaw, false);
         if (!isBackground) {
-          updateVirtualLed(r, g, b, ambientIntensity);
+          updateVirtualLed(r, g, b, finalAmbient);
+          updateRangeNeedle(finalAmbient);
         }
-        dispatchDynamicBeat(r, g, b, ambientIntensity, 240);
+        dispatchDynamicBeat(r, g, b, finalAmbient, 240);
       }
     }
   }
@@ -2160,6 +2671,7 @@
   }
 
   renderTimeline();
+  updateRangeWindowUI();
 </script>
 </body>
 </html>
