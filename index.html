@@ -459,7 +459,8 @@
           <button class="music-mode-btn" id="mode-volcano" onclick="setMusicMode('volcano')">🌋 Volcano Lava</button>
           <button class="music-mode-btn" id="mode-gold" onclick="setMusicMode('gold')">💡 Gold Acoustic</button>
           <button class="music-mode-btn" id="mode-ice" onclick="setMusicMode('ice')">❄️ Glacier Ice</button>
-          <button class="music-mode-btn" id="mode-free" onclick="setMusicMode('free')" style="grid-column:span 2; background:linear-gradient(135deg, rgba(236,72,153,0.25), rgba(99,102,241,0.25)); border-color:var(--accent);">🎨 Free Custom Beat Color (Pick Any Color)</button>
+          <button class="music-mode-btn" id="mode-ai" onclick="setMusicMode('ai')" style="background:linear-gradient(135deg, rgba(16,185,129,0.25), rgba(99,102,241,0.25)); border-color:#34d399; color:#a7f3d0; font-weight:700;">✨ Gemini AI Director</button>
+          <button class="music-mode-btn" id="mode-free" onclick="setMusicMode('free')" style="background:linear-gradient(135deg, rgba(236,72,153,0.25), rgba(99,102,241,0.25)); border-color:var(--accent);">🎨 Free Custom Beat Color</button>
         </div>
       </div>
 
@@ -490,6 +491,83 @@
             <span style="color:var(--text);">Flash white on heavy kick drops</span>
           </label>
         </div>
+      </div>
+    </div>
+
+    <!-- 🧠 GEMINI AI MUSIC DIRECTOR (INTELLIGENT EMOTIONAL LIGHTING) -->
+    <div class="card" id="gemini-ai-card" style="border-color: rgba(52, 211, 153, 0.4); background: linear-gradient(180deg, rgba(6, 78, 59, 0.25), var(--card-bg));">
+      <div class="card-title" style="color:#34d399; display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span>✨ Gemini AI Music Director</span>
+          <span class="status-pill" id="ai-director-status-pill" style="background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.4); font-size:0.65rem;">🟢 AI READY</span>
+        </div>
+        <button class="music-mode-btn" id="btn-activate-ai-mode" onclick="setMusicMode('ai')" style="font-size:0.7rem; padding:4px 10px; border-color:#34d399; background:rgba(16,185,129,0.2); color:#a7f3d0;">
+          ▶ Engage AI Mode
+        </button>
+      </div>
+
+      <div style="font-size:0.72rem; color:var(--subtext); margin-bottom:10px;">
+        Gemini decodes musical context, momentum, and tension/drop evolution to dictate high-level emotion, scene, and color palette, while your existing RGB engine executes real-time 60 FPS hardware reactions.
+      </div>
+
+      <!-- Live AI Emotional Intelligence HUD -->
+      <div style="padding:10px; background:rgba(0,0,0,0.3); border-radius:10px; border:1px solid rgba(52,211,153,0.2); margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-weight:700; color:#6ee7b7; font-size:0.75rem;">🎭 Vibe & Mood:</span>
+            <b id="ai-mood-display" style="color:#ffffff; font-size:0.8rem; background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:6px;">Futuristic • Excited</b>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="beat-badge peak" id="ai-event-badge" style="font-size:0.65rem; padding:2px 6px;">⚡ BUILD_UP</span>
+            <span id="ai-confidence-pill" style="font-size:0.68rem; color:#94a3b8;">Confidence: 95%</span>
+          </div>
+        </div>
+
+        <div style="font-size:0.75rem; color:#e2e8f0; font-style:italic; margin-bottom:8px;" id="ai-scene-description">
+          "Futuristic neon pulses of cyan, magenta, and purple reacting intensely to rising energy."
+        </div>
+
+        <!-- 3-Color Dynamic Palette Swatch -->
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:0.68rem; color:var(--subtext); font-weight:700;">AI Emotional Palette:</span>
+          <div style="display:flex; gap:6px; flex:1;">
+            <div id="ai-color-swatch-0" style="flex:1; height:20px; border-radius:6px; background:#00F3FF; box-shadow:0 0 8px rgba(0,243,255,0.5); display:flex; align-items:center; justify-content:center; font-size:0.6rem; color:#000; font-weight:bold;">#00F3FF</div>
+            <div id="ai-color-swatch-1" style="flex:1; height:20px; border-radius:6px; background:#FF007F; box-shadow:0 0 8px rgba(255,0,127,0.5); display:flex; align-items:center; justify-content:center; font-size:0.6rem; color:#fff; font-weight:bold;">#FF007F</div>
+            <div id="ai-color-swatch-2" style="flex:1; height:20px; border-radius:6px; background:#7B00FF; box-shadow:0 0 8px rgba(123,0,255,0.5); display:flex; align-items:center; justify-content:center; font-size:0.6rem; color:#fff; font-weight:bold;">#7B00FF</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Natural-Language User Command Input -->
+      <div style="margin-bottom:8px;">
+        <span style="font-size:0.7rem; color:#a7f3d0; font-weight:700;">💬 Natural-Language Style Commands (Direct Gemini):</span>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <input type="text" id="ai-user-prompt-input" placeholder="e.g. 'Make it darker', 'Feel the bass more', 'Cinematic sunset'..." 
+                 style="flex:1; padding:8px 12px; background:rgba(0,0,0,0.4); border:1px solid rgba(52,211,153,0.3); border-radius:8px; color:#fff; font-size:0.75rem;"
+                 onkeydown="if(event.key==='Enter') sendUserAiCommand()">
+          <button onclick="sendUserAiCommand()" style="padding:8px 14px; background:linear-gradient(135deg, #10b981, #059669); border:none; border-radius:8px; color:#fff; font-weight:700; font-size:0.75rem; cursor:pointer;">
+            Ask AI
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick AI Style Chips -->
+      <div style="display:flex; gap:5px; flex-wrap:wrap; margin-bottom:8px;">
+        <span class="genre-chip" onclick="sendUserAiCommand('Make it darker and moody')">🌙 Darker</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Make it emotional and melodic')">💖 Emotional</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Feel the heavy bass and kick drops')">🥁 Heavy Bass</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Make it cinematic like a movie score')">🎬 Cinematic</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Make it futuristic cyberpunk rave')">🚀 Futuristic</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Surprise me with something creative')">🎲 Surprise Me</span>
+        <span class="genre-chip" onclick="sendUserAiCommand('Follow the music naturally')">🌊 Natural Flow</span>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:var(--subtext);">
+        <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+          <input type="checkbox" id="chk-ai-auto-evolve" checked>
+          <span>Auto-evolve lighting on drops & section transitions</span>
+        </label>
+        <span id="ai-last-sync-time" style="color:#6ee7b7; font-size:0.68rem;">Updated just now</span>
       </div>
     </div>
 
@@ -692,6 +770,7 @@
         </div>
         <div class="genre-chips" style="margin-top:2px;">
           <span class="genre-chip active" id="chroma-pal-flow" onclick="setChromaPalette('flow')">🌈 Multicolor Flow (Rainbow + White)</span>
+          <span class="genre-chip" id="chroma-pal-vocal_spectrum" onclick="setChromaPalette('vocal_spectrum')">🎙️ Deep Violet & Vocal Spectrum</span>
           <span class="genre-chip" id="chroma-pal-spectrum" onclick="setChromaPalette('spectrum')">🎼 Full 360° Spectrum</span>
           <span class="genre-chip" id="chroma-pal-cyber" onclick="setChromaPalette('cyber')">🌆 Cyber Neon</span>
           <span class="genre-chip" id="chroma-pal-sunset" onclick="setChromaPalette('sunset')">🌅 Sunset Heat</span>
@@ -1237,6 +1316,180 @@
   let vocalHistory = [];
   let kickHistory = [];
 
+  // ====================================================================
+  // 🧠 GEMINI AI MUSIC DIRECTOR INTELLIGENCE LAYER
+  // ====================================================================
+  let aiLightingState = {
+    active: false,
+    mood: 'futuristic',
+    emotion: 'energetic',
+    scene: 'cyberpunk_rave',
+    colors: ['#00F3FF', '#FF007F', '#7B00FF'],
+    colorsRGB: [[0, 243, 255], [255, 0, 127], [123, 0, 255]],
+    brightness: 0.90,
+    saturation: 0.95,
+    effect: 'pulse',
+    movement_speed: 0.80,
+    beat_reactivity: 0.95,
+    transition: 'intensify',
+    event: 'BUILD_UP',
+    description: 'Futuristic neon pulses of cyan, magenta, and purple reacting intensely to rising energy.',
+    confidence: 95,
+    lastUpdated: 0
+  };
+
+  let isAiRequestPending = false;
+  let lastAiRequestTime = 0;
+  let aiMusicHistory = [];
+  let lastSnapshotTime = 0;
+
+  function hexToRgb(hex) {
+    if (!hex) return [0, 245, 255];
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    let num = parseInt(hex, 16);
+    if (isNaN(num)) return [0, 245, 255];
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+  }
+
+  function applyAiLightingInterpretation(interp) {
+    if (!interp) return;
+    if (interp.mood) aiLightingState.mood = interp.mood;
+    if (interp.emotion) aiLightingState.emotion = interp.emotion;
+    if (interp.scene) aiLightingState.scene = interp.scene;
+    if (Array.isArray(interp.colors) && interp.colors.length >= 3) {
+      aiLightingState.colors = interp.colors.slice(0, 3);
+      aiLightingState.colorsRGB = aiLightingState.colors.map(hexToRgb);
+    }
+    if (typeof interp.brightness === 'number') aiLightingState.brightness = interp.brightness;
+    if (typeof interp.saturation === 'number') aiLightingState.saturation = interp.saturation;
+    if (interp.effect) aiLightingState.effect = interp.effect;
+    if (typeof interp.movement_speed === 'number') aiLightingState.movement_speed = interp.movement_speed;
+    if (typeof interp.beat_reactivity === 'number') aiLightingState.beat_reactivity = interp.beat_reactivity;
+    if (interp.transition) aiLightingState.transition = interp.transition;
+    if (interp.event) aiLightingState.event = interp.event;
+    if (interp.description) aiLightingState.description = interp.description;
+    if (typeof interp.confidence === 'number') aiLightingState.confidence = Math.round(interp.confidence * 100);
+    aiLightingState.lastUpdated = Date.now();
+
+    updateAiDirectorUI();
+  }
+
+  function updateAiDirectorUI() {
+    let moodEl = document.getElementById('ai-mood-display');
+    if (moodEl) moodEl.textContent = `${aiLightingState.mood.toUpperCase()} • ${aiLightingState.emotion}`;
+    
+    let eventEl = document.getElementById('ai-event-badge');
+    if (eventEl) {
+      eventEl.textContent = `⚡ ${aiLightingState.event}`;
+      if (['DROP', 'PEAK', 'BUILD_UP'].includes(aiLightingState.event)) {
+        eventEl.className = 'beat-badge peak';
+      } else {
+        eventEl.className = 'beat-badge normal';
+      }
+    }
+
+    let confEl = document.getElementById('ai-confidence-pill');
+    if (confEl) confEl.textContent = `Confidence: ${aiLightingState.confidence}%`;
+
+    let descEl = document.getElementById('ai-scene-description');
+    if (descEl) descEl.textContent = `"${aiLightingState.description || aiLightingState.scene}"`;
+
+    if (aiLightingState.colors && aiLightingState.colors.length >= 3) {
+      for (let i = 0; i < 3; i++) {
+        let sw = document.getElementById('ai-color-swatch-' + i);
+        if (sw) {
+          let hex = aiLightingState.colors[i];
+          sw.style.background = hex;
+          sw.textContent = hex.toUpperCase();
+          sw.style.boxShadow = `0 0 10px ${hex}88`;
+          let rgb = aiLightingState.colorsRGB[i] || [255, 255, 255];
+          let lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+          sw.style.color = lum > 0.55 ? '#000000' : '#ffffff';
+        }
+      }
+    }
+
+    let syncEl = document.getElementById('ai-last-sync-time');
+    if (syncEl) syncEl.textContent = 'Synced ' + new Date().toLocaleTimeString();
+  }
+
+  async function requestGeminiAiUpdate(userPrompt = null, force = false) {
+    let now = Date.now();
+    let minGap = (userPrompt || force) ? 2000 : 7000;
+    if (isAiRequestPending) return;
+    if (now - lastAiRequestTime < minGap && !force) return;
+
+    let autoEvolve = document.getElementById('chk-ai-auto-evolve')?.checked ?? true;
+    if (!userPrompt && !force && !autoEvolve && activeMusicMode !== 'ai') return;
+
+    isAiRequestPending = true;
+    lastAiRequestTime = now;
+
+    let pill = document.getElementById('ai-director-status-pill');
+    if (pill) {
+      pill.textContent = '⏳ AI THINKING...';
+      pill.style.background = 'rgba(234,179,8,0.2)';
+      pill.style.color = '#fde047';
+      pill.style.borderColor = 'rgba(234,179,8,0.4)';
+    }
+
+    try {
+      let currentMetrics = {
+        bpm: currentBPM || 120,
+        bass: Number((displayBass / 255).toFixed(2)),
+        mid: Number((displayMids / 255).toFixed(2)),
+        treble: Number((displayTreb / 255).toFixed(2)),
+        volume: Number((Math.min(255, (displayBass + displayMids + displayTreb) / 3) / 255).toFixed(2)),
+        energy: Number((Math.min(1.0, (avgKickEnvelope * 1.2 + avgMidEnvelope) / 200)).toFixed(2)),
+        beat_strength: Number((Math.min(1.0, maxKickObserved / 200)).toFixed(2))
+      };
+
+      let payload = {
+        current: currentMetrics,
+        history: aiMusicHistory.slice(-5),
+        user_command: userPrompt || ""
+      };
+
+      let resp = await fetch('/api/gemini/interpret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (resp.ok) {
+        let jsonRes = await resp.json();
+        if (jsonRes.interpretation) {
+          applyAiLightingInterpretation(jsonRes.interpretation);
+        }
+      }
+    } catch(err) {
+      console.warn("Gemini AI fetch notice:", err);
+    } finally {
+      isAiRequestPending = false;
+      let p = document.getElementById('ai-director-status-pill');
+      if (p) {
+        p.textContent = (activeMusicMode === 'ai') ? '🟢 AI ENGAGED' : '🟢 AI READY';
+        p.style.background = 'rgba(16,185,129,0.2)';
+        p.style.color = '#34d399';
+        p.style.borderColor = 'rgba(16,185,129,0.4)';
+      }
+    }
+  }
+
+  function sendUserAiCommand(customText = null) {
+    let input = document.getElementById('ai-user-prompt-input');
+    let text = customText || (input ? input.value.trim() : '');
+    if (!text) return;
+    if (input && !customText) input.value = '';
+    
+    if (activeMusicMode !== 'ai') {
+      setMusicMode('ai');
+    }
+    requestGeminiAiUpdate(text, true);
+  }
+
+
   // Master Studio ON/OFF Toggle
   function toggleStudioMaster() {
     isCustomStudioActive = !isCustomStudioActive;
@@ -1465,7 +1718,27 @@
       return [255, 255, 255]; // Crisp diamond white highlight included in multicolour!
     }
 
-    if (p === 'flow') {
+    if (p === 'vocal_spectrum') {
+      // 🎙️ VOCAL & SPECTRUM INSTRUMENT MAPPING:
+      // Low voice / vocals: purplish, violet, fuchsia hues (255° to 305°)
+      // Deep bass: crimson / warm amber low-frequency foundation (345° to 25°)
+      // Mid rhythm & chords: electric cyan / sapphire (185° to 215°)
+      // Transients / cymbals: diamond white sparkle
+      if (vocals > 25 && vocals >= kick * 0.8) {
+        let noteShift = ((idx * 5) % 40) - 20;
+        let vHue = 275 + noteShift;
+        return hsvToRgb((vHue + chromaRootOffset) % 360, 0.95, 1.0);
+      } else if (kick > 35 && kick > vocals * 1.1) {
+        let bHue = (idx % 2 === 0) ? 355 : 18;
+        return hsvToRgb((bHue + chromaRootOffset) % 360, 1.0, 1.0);
+      } else if (mids > 28) {
+        let mHue = 195 + ((idx * 6) % 30);
+        return hsvToRgb((mHue + chromaRootOffset) % 360, 1.0, 1.0);
+      } else {
+        let baseNoteHue = (idx * 30 * chromaOctaveSpread + 270 + chromaRootOffset) % 360;
+        return hsvToRgb(baseNoteHue, 0.90, 1.0);
+      }
+    } else if (p === 'flow') {
       // 🌈 DYNAMIC MULTICOLOR FLOW: Shifts continuously with notes, chords & vocals!
       let baseHue = Math.round((idx * 30 * chromaOctaveSpread + chromaRootOffset) % 360 + 360) % 360;
       let harmonicMod = Math.round((vocals * 0.35 + mids * 0.25)) % 60;
@@ -1502,6 +1775,21 @@
     document.querySelectorAll('.music-mode-btn').forEach(b => b.classList.remove('active'));
     let el = document.getElementById('mode-' + m);
     if (el) el.classList.add('active');
+    let aiBtn = document.getElementById('btn-activate-ai-mode');
+    if (aiBtn) {
+      if (m === 'ai') {
+        aiBtn.textContent = '● AI Mode Active';
+        aiBtn.style.background = '#10b981';
+        aiBtn.style.color = '#fff';
+      } else {
+        aiBtn.textContent = '▶ Engage AI Mode';
+        aiBtn.style.background = 'rgba(16,185,129,0.2)';
+        aiBtn.style.color = '#a7f3d0';
+      }
+    }
+    if (m === 'ai') {
+      requestGeminiAiUpdate(null, false);
+    }
   }
 
   function setFreeMusicColor(hex) {
@@ -1610,6 +1898,25 @@
         return [255, 255, 255]; // Crisp white flash on heavy drop
       }
       return [freeMusicColorRGB[0], freeMusicColorRGB[1], freeMusicColorRGB[2]];
+    } else if (m === 'ai') {
+      // ✨ GEMINI AI MUSIC DIRECTOR
+      // Uses Gemini's emotional 3-color palette interpolated with real-time audio dynamics
+      let pal = aiLightingState.colorsRGB;
+      if (!pal || pal.length < 3) pal = [[0, 243, 255], [255, 0, 127], [123, 0, 255]];
+      if (isHeavy) {
+        // Peak beat climax: flash between primary intense color (pal[0]) and secondary (pal[1])
+        return (modeBeatCount % 2 === 0) ? pal[0] : pal[1];
+      } else if (vocals > 35 && vocals > kick) {
+        // Melodic vocal presence: emotional midpoint color (pal[1])
+        return pal[1];
+      } else if (mids > 30) {
+        // Rhythm / chords: harmonic background color (pal[2])
+        return pal[2];
+      } else {
+        // Ambient groove: cycle based on detected note and mood
+        let pIdx = (detectedPitchNoteIndex + modeBeatCount) % 3;
+        return pal[pIdx];
+      }
     }
     return [0, 245, 255];
   }
@@ -2494,9 +2801,29 @@
     if (recentEnergy.length > 25) recentEnergy.shift();
     let avgRecent = recentEnergy.reduce((a, b) => a + b, 0) / recentEnergy.length;
 
+    // Rolling snapshot recording for Gemini context & music evolution
+    if (now - lastSnapshotTime > 1200) {
+      lastSnapshotTime = now;
+      aiMusicHistory.push({
+        bass: Number((kick / 255).toFixed(2)),
+        mid: Number((mids / 255).toFixed(2)),
+        treble: Number((treble / 255).toFixed(2)),
+        energy: Number((totalEnergy / 255).toFixed(2))
+      });
+      if (aiMusicHistory.length > 8) aiMusicHistory.shift();
+
+      // Periodic AI heartbeat if listening in AI mode
+      if (activeMusicMode === 'ai' && (now - lastAiRequestTime > 12000)) {
+        requestGeminiAiUpdate(null, false);
+      }
+    }
+
     // 6. STAGE 1 (BEFORE SPIKE): TENSION PRE-DROP RADAR
     let energyDelta = totalEnergy - avgRecent;
     if (enableSpikeAnticipation && energyDelta > 14 && totalEnergy > 26 && (now - lastBeatTimestamp > 110)) {
+      if (activeMusicMode === 'ai' && energyDelta > 16 && (now - lastAiRequestTime > 8000)) {
+        requestGeminiAiUpdate(null, false);
+      }
       if (spikePhaseBadge && !isBackground) {
         spikePhaseBadge.textContent = '⚡ Stage 1: Tension Radar (Pre-Drop)';
         spikePhaseBadge.style.color = '#fde68a';
@@ -2513,6 +2840,9 @@
     // 7. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
     let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 25);
     if (isDrop) {
+      if (activeMusicMode === 'ai' && (now - lastAiRequestTime > 7000)) {
+        requestGeminiAiUpdate(null, false);
+      }
       let finalDrop = applyBrightnessRange(0, false);
       if (!isBackground) {
         if (badge) {
@@ -2639,6 +2969,11 @@
           decayMs = activeDecay;
         }
 
+        if (activeMusicMode === 'ai') {
+          decayMs = Math.max(120, Math.round(decayMs * (1.5 - aiLightingState.movement_speed * 0.7)));
+          rawIntensity = Math.min(255, Math.max(20, Math.round(rawIntensity * aiLightingState.brightness * (aiLightingState.beat_reactivity * 0.4 + 0.6))));
+        }
+
         // Apply User's Custom Brightness Range [Floor% - Ceiling%]
         let finalIntensity = applyBrightnessRange(rawIntensity, false);
 
@@ -2657,6 +2992,9 @@
         lastBeatTimestamp = now;
         let [r, g, b] = getMusicModeColor(false, kick, vocals, mids, treble);
         let ambientRaw = Math.min(65, Math.max(30, Math.round(totalEnergy * 0.8)));
+        if (activeMusicMode === 'ai') {
+          ambientRaw = Math.min(255, Math.round(ambientRaw * aiLightingState.brightness));
+        }
         let finalAmbient = applyBrightnessRange(ambientRaw, false);
         if (!isBackground) {
           updateVirtualLed(r, g, b, finalAmbient);

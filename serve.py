@@ -19,6 +19,7 @@ import threading
 import time
 import sys
 import os
+import json
 
 PORT = 8000
 ESP32_DEFAULT_COM = "COM3"
@@ -93,6 +94,39 @@ except ImportError:
 # Locate index.html
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(SCRIPT_DIR, "index.html")
+
+def get_gemini_api_key():
+    """Securely load Gemini API key from environment variable or local .env file."""
+    k = os.environ.get("GEMINI_API_KEY", "")
+    if k:
+        return k.strip()
+    env_file = os.path.join(SCRIPT_DIR, ".env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("GEMINI_API_KEY="):
+                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception as e:
+            print(f"⚠️ Error reading .env: {e}")
+    return ""
+
+DEFAULT_AI_FALLBACK = {
+    "mood": "futuristic",
+    "emotion": "energetic",
+    "scene": "cyberpunk_rave",
+    "colors": ["#00F3FF", "#FF007F", "#7B00FF"],
+    "brightness": 0.90,
+    "saturation": 0.95,
+    "effect": "pulse",
+    "movement_speed": 0.80,
+    "beat_reactivity": 0.95,
+    "transition": "intensify",
+    "event": "GROOVE",
+    "description": "Adaptive dynamic spectrum reacting to beats and harmonics.",
+    "confidence": 0.88
+}
 
 class StudioHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -197,6 +231,105 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
                 self.wfile.write(b"index.html not found.")
+                return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/gemini/interpret":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+                data = json.loads(post_body)
+                
+                api_key = get_gemini_api_key()
+                if not api_key:
+                    # Graceful fallback if no API key configured
+                    resp_payload = {
+                        "success": True,
+                        "interpretation": DEFAULT_AI_FALLBACK,
+                        "notice": "GEMINI_API_KEY not configured. Using default dynamic interpretation."
+                    }
+                    resp_bytes = json.dumps(resp_payload).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(resp_bytes)
+                    return
+
+                system_prompt = (
+                    "You are an expert AI lighting director for a music-reactive RGB LED system.\n"
+                    "Analyze the musical metrics and recent history.\n"
+                    "Decide the emotional, stylistic, and aesthetic lighting direction.\n"
+                    "Respond with ONLY valid JSON with this exact schema:\n"
+                    "{\n"
+                    '  "mood": "string (e.g. dark_euphoric, intense, dreamy, neon_drive)",\n'
+                    '  "emotion": "string (e.g. ecstatic, melancholic, suspenseful)",\n'
+                    '  "scene": "string (e.g. building_tension, cyber_rave, midnight_chill)",\n'
+                    '  "colors": ["#RRGGBB", "#RRGGBB", "#RRGGBB"],\n'
+                    '  "brightness": 0.85,\n'
+                    '  "saturation": 0.90,\n'
+                    '  "effect": "pulse",\n'
+                    '  "movement_speed": 0.75,\n'
+                    '  "beat_reactivity": 0.90,\n'
+                    '  "transition": "intensify",\n'
+                    '  "event": "BUILD_UP",\n'
+                    '  "description": "creative one-line interpretation",\n'
+                    '  "confidence": 0.92\n'
+                    "}"
+                )
+
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
+                prompt_content = f"{system_prompt}\n\nMusic Context & Evolution:\n{json.dumps(data)}"
+                
+                req_body = {
+                    "contents": [{"parts": [{"text": prompt_content}]}],
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "temperature": 0.6
+                    }
+                }
+                
+                req = urllib.request.Request(
+                    gemini_url,
+                    data=json.dumps(req_body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                with urllib.request.urlopen(req, timeout=12) as g_resp:
+                    g_data = json.loads(g_resp.read().decode("utf-8"))
+                    raw_text = g_data["candidates"][0]["content"]["parts"][0]["text"]
+                    interpretation = json.loads(raw_text)
+                    
+                    resp_payload = {
+                        "success": True,
+                        "interpretation": interpretation
+                    }
+                    resp_bytes = json.dumps(resp_payload).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(resp_bytes)
+                    return
+            except Exception as e:
+                print(f"⚠️ Gemini API Bridge Notice: {e}")
+                resp_payload = {
+                    "success": False,
+                    "error": str(e),
+                    "interpretation": DEFAULT_AI_FALLBACK
+                }
+                resp_bytes = json.dumps(resp_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(resp_bytes)
                 return
 
         self.send_response(404)
