@@ -641,6 +641,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     </div>
   </div>
   <div style="display:flex; gap:6px; align-items:center;">
+    <span class="status-pill" id="bg-status-pill" style="background:rgba(16,185,129,0.15); color:#34d399; border-color:rgba(16,185,129,0.3); font-size:0.65rem;" title="Background Tab Audio Sync: Lights continue dancing when this tab is minimized or hidden!">⚡ Background Ready</span>
     <span class="status-pill" id="ble-status-pill" style="background:rgba(99,102,241,0.15); color:#a5b4fc; border-color:rgba(99,102,241,0.3);">⚪ BLE Ready</span>
     <button id="btn-ble-connect" onclick="toggleBluetoothConnect()" style="background:linear-gradient(135deg,#4f46e5,#06b6d4); color:#fff; border:none; border-radius:10px; font-size:0.68rem; font-weight:700; padding:6px 10px; cursor:pointer; display:flex; align-items:center; gap:4px; box-shadow:0 2px 8px rgba(79,70,229,0.35);">
       <span>🔵</span> Connect Bluetooth
@@ -922,6 +923,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         💡 <b>How to share Spotify audio in Chrome properly:</b><br>
         1. When Chrome pops up the share dialog, choose <b>Entire Screen</b> (or Spotify tab).<br>
         2. <b>IMPORTANT:</b> Check the box <b>"Also share system audio"</b> at bottom-left, then click Share!<br>
+        3. <b>⚡ Background Tab Mode:</b> You can minimize Chrome or switch to any other tab/game/code — the LED beat sync runs continuously in the background!<br>
         <i>(Tip: If using Bluetooth BLE, you don't even need USB cable or hostel Wi-Fi!)</i>
       </div>
     </div>
@@ -1503,6 +1505,7 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
     isListening = false;
     isFilePlaying = false;
     isEarbudsSyncActive = false;
+    isDynamicLoopQueued = false;
     
     if (audioStream) {
       audioStream.getTracks().forEach(t => t.stop());
@@ -1516,6 +1519,11 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
       clearInterval(demoOscTimer);
       demoOscTimer = null;
     }
+
+    if (typeof stopBackgroundAudioWorker === 'function') {
+      stopBackgroundAudioWorker();
+    }
+    document.title = 'ESP32 RGB PRO - Studio';
 
     let audioPlayer = document.getElementById('media-audio-player');
     if (audioPlayer) {
@@ -1633,6 +1641,12 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
     let interval = Math.round(60000 / currentBPM);
     sendEarbudsStep();
     earbudsTimer = setInterval(sendEarbudsStep, interval);
+    if (typeof initBackgroundEngine === 'function') initBackgroundEngine();
+    if (bgWorker) {
+      bgWorker.postMessage({ action: 'startMetro', interval: interval });
+    }
+    if (typeof requestScreenWakeLock === 'function') requestScreenWakeLock();
+    if (typeof updateBackgroundPill === 'function') updateBackgroundPill(true);
   }
 
   function sendEarbudsStep() {
@@ -1653,9 +1667,15 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
     }
 
     if (isDrop) {
-      badge.className = 'beat-badge drop';
-      badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
-      updateVirtualLed(0, 0, 0, 0);
+      if (!document.hidden) {
+        if (badge) {
+          badge.className = 'beat-badge drop';
+          badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+        }
+        updateVirtualLed(0, 0, 0, 0);
+      } else {
+        document.title = '🤫 [DROP] ' + currentBPM + ' BPM';
+      }
       sendDynamicBeat(0, 0, 0, 0, 100);
       playClickAudio(false);
       return;
@@ -1666,21 +1686,36 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
     let decay = isHeavyKick ? activeDecay : Math.round(activeDecay * 0.8);
 
     if (isHeavyKick) {
-      badge.className = 'beat-badge peak';
-      badge.textContent = `🔥 HEAVY BEAT (Kick Peak 255)`;
+      if (!document.hidden) {
+        if (badge) {
+          badge.className = 'beat-badge peak';
+          badge.textContent = `🔥 HEAVY BEAT (Kick Peak 255)`;
+        }
+      } else {
+        document.title = '🔥 [BEAT] ' + currentBPM + ' BPM';
+      }
       playClickAudio(true);
     } else {
-      badge.className = 'beat-badge normal';
-      badge.textContent = `✨ GROOVE BEAT (Glow ${intensity})`;
+      if (!document.hidden) {
+        if (badge) {
+          badge.className = 'beat-badge normal';
+          badge.textContent = `✨ GROOVE BEAT (Glow ${intensity})`;
+        }
+      } else {
+        document.title = '✨ [GROOVE] ' + currentBPM + ' BPM';
+      }
       playClickAudio(false);
     }
 
-    updateVirtualLed(r, g, b, intensity);
+    if (!document.hidden) {
+      updateVirtualLed(r, g, b, intensity);
+    }
     sendDynamicBeat(r, g, b, intensity, decay);
   }
 
   function earbudsMonitorLoop() {
     if (!isEarbudsSyncActive) return;
+    if (document.hidden) return; // Save GPU/CPU while tab is in background
 
     let now = Date.now();
     let beatPeriod = 60000 / currentBPM;
@@ -1741,6 +1776,165 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
   }
 
   // ====================================================================
+  // ⚡ MULTI-THREADED BACKGROUND TAB ENGINE & AUDIO KEEP-ALIVE
+  // ====================================================================
+  let bgWorker = null;
+  let bgAudioProcessor = null;
+  let silentKeepAliveOsc = null;
+  let silentKeepAliveGain = null;
+  let screenWakeLock = null;
+  let isDynamicLoopQueued = false;
+  let lastDynamicStepTime = 0;
+
+  function initBackgroundEngine() {
+    if (bgWorker) return;
+    try {
+      const workerBlobCode = `
+        let audioTimer = null;
+        let metroTimer = null;
+        self.onmessage = function(e) {
+          const d = e.data;
+          if (d.action === 'startAudio') {
+            if (audioTimer) clearInterval(audioTimer);
+            audioTimer = setInterval(() => {
+              self.postMessage({ type: 'audioTick' });
+            }, d.interval || 28);
+          } else if (d.action === 'stopAudio') {
+            if (audioTimer) { clearInterval(audioTimer); audioTimer = null; }
+          } else if (d.action === 'startMetro') {
+            if (metroTimer) clearInterval(metroTimer);
+            metroTimer = setInterval(() => {
+              self.postMessage({ type: 'metroTick' });
+            }, d.interval || 500);
+          } else if (d.action === 'stopMetro') {
+            if (metroTimer) { clearInterval(metroTimer); metroTimer = null; }
+          }
+        };
+      `;
+      const blob = new Blob([workerBlobCode], { type: 'application/javascript' });
+      bgWorker = new Worker(URL.createObjectURL(blob));
+      bgWorker.onmessage = function(e) {
+        if (e.data.type === 'audioTick') {
+          if (isListening && document.hidden) {
+            triggerBackgroundAudioStep();
+          }
+        } else if (e.data.type === 'metroTick') {
+          if (isEarbudsSyncActive) {
+            onBackgroundMetroTick();
+          }
+        }
+      };
+    } catch(err) {
+      console.warn("Background Worker init notice:", err);
+    }
+  }
+
+  function startBackgroundAudioWorker() {
+    initBackgroundEngine();
+    if (bgWorker) {
+      bgWorker.postMessage({ action: 'startAudio', interval: 28 });
+    }
+    requestScreenWakeLock();
+    updateBackgroundPill(true);
+  }
+
+  function stopBackgroundAudioWorker() {
+    if (bgWorker) {
+      bgWorker.postMessage({ action: 'stopAudio' });
+      bgWorker.postMessage({ action: 'stopMetro' });
+    }
+    releaseScreenWakeLock();
+    updateBackgroundPill(false);
+  }
+
+  function updateBackgroundPill(active) {
+    let pill = document.getElementById('bg-status-pill');
+    if (!pill) return;
+    if (active) {
+      pill.textContent = document.hidden ? '💤 Background Syncing' : '⚡ Background Ready';
+      pill.style.background = 'rgba(16,185,129,0.2)';
+      pill.style.color = '#34d399';
+      pill.style.borderColor = 'rgba(16,185,129,0.4)';
+    } else {
+      pill.textContent = '⚪ Background Idle';
+      pill.style.background = 'rgba(99,102,241,0.15)';
+      pill.style.color = '#a5b4fc';
+      pill.style.borderColor = 'rgba(99,102,241,0.3)';
+    }
+  }
+
+  // Silent Audio Output node to keep Chrome Audio Thread awake in background tabs
+  function enableAudioKeepAlive() {
+    if (!audioCtx) return;
+    if (!silentKeepAliveOsc) {
+      try {
+        silentKeepAliveGain = audioCtx.createGain();
+        silentKeepAliveGain.gain.setValueAtTime(0.00001, audioCtx.currentTime); // Inaudible
+        silentKeepAliveOsc = audioCtx.createOscillator();
+        silentKeepAliveOsc.frequency.setValueAtTime(440, audioCtx.currentTime);
+        silentKeepAliveOsc.connect(silentKeepAliveGain);
+        silentKeepAliveGain.connect(audioCtx.destination);
+        silentKeepAliveOsc.start();
+      } catch(e) {
+        console.warn("Silent keep-alive error:", e);
+      }
+    }
+  }
+
+  // Screen Wake Lock API: Prevent laptop display / OS sleep while lighting is active
+  async function requestScreenWakeLock() {
+    if ('wakeLock' in navigator) {
+      try {
+        if (!screenWakeLock) {
+          screenWakeLock = await navigator.wakeLock.request('screen');
+          screenWakeLock.addEventListener('release', () => { screenWakeLock = null; });
+        }
+      } catch(e) {}
+    }
+  }
+
+  function releaseScreenWakeLock() {
+    if (screenWakeLock) {
+      screenWakeLock.release().catch(() => {});
+      screenWakeLock = null;
+    }
+  }
+
+  // Earbuds Metronome background tick handler
+  function onBackgroundMetroTick() {
+    let now = Date.now();
+    let interval = Math.round(60000 / currentBPM);
+    if (now - lastBeatTimestamp < interval * 0.75) return;
+    sendEarbudsStep();
+  }
+
+  // Trigger audio step during background execution
+  function triggerBackgroundAudioStep() {
+    let now = performance.now();
+    if (now - lastDynamicStepTime < 22) return;
+    lastDynamicStepTime = now;
+    if (typeof processDynamicAudioFrame === 'function') {
+      processDynamicAudioFrame(true);
+    }
+  }
+
+  // Visibility change listener: resume 60fps UI when user returns to tab
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      document.title = 'ESP32 RGB PRO - Studio';
+      updateBackgroundPill(isListening || isEarbudsSyncActive);
+      if (isListening && !isDynamicLoopQueued) {
+        processDynamicAudioLoop();
+      }
+      if (isEarbudsSyncActive) {
+        requestAnimationFrame(earbudsMonitorLoop);
+      }
+    } else {
+      updateBackgroundPill(isListening || isEarbudsSyncActive);
+    }
+  });
+
+  // ====================================================================
   // 🎵 IN-BROWSER AUDIO PLAYER & FULL FFT WEB AUDIO PIPELINE
   // ====================================================================
   let analyser = null, audioStream = null;
@@ -1754,6 +1948,27 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.05; // ULTRA LOW LATENCY (0.05 for near-instant transient response!)
+    }
+    enableAudioKeepAlive();
+    initBackgroundEngine();
+
+    // Hardware soundcard clock ticker (never throttled by Chrome in background tabs!)
+    if (!bgAudioProcessor && audioCtx.createScriptProcessor) {
+      try {
+        bgAudioProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
+        bgAudioProcessor.onaudioprocess = function(e) {
+          let out = e.outputBuffer.getChannelData(0);
+          for (let i = 0; i < out.length; i++) out[i] = 0; // Absolute silence
+
+          if (isListening && document.hidden) {
+            triggerBackgroundAudioStep();
+          }
+        };
+        analyser.connect(bgAudioProcessor);
+        bgAudioProcessor.connect(audioCtx.destination);
+      } catch(e) {
+        console.warn("ScriptProcessor background clock fallback:", e);
+      }
     }
   }
 
@@ -1775,8 +1990,10 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
 
     isFilePlaying = true;
     isListening = true;
-    document.getElementById('hud-status').textContent = '🎵 Playing: ' + file.name.substring(0, 24);
+    let hud = document.getElementById('hud-status');
+    if (hud) hud.textContent = '🎵 Playing: ' + file.name.substring(0, 24);
     setMode(11);
+    startBackgroundAudioWorker();
     processDynamicAudioLoop();
   }
 
@@ -1812,6 +2029,7 @@ Please open http://localhost:8000 in Chrome to connect via Bluetooth!
       osc.stop(audioCtx.currentTime + 0.2);
     }, 240);
 
+    startBackgroundAudioWorker();
     processDynamicAudioLoop();
   }
 
@@ -1887,6 +2105,7 @@ To allow it in Chrome / Edge:
       const hud = document.getElementById('hud-status');
       if (hud) hud.textContent = label;
       setMode(11);
+      startBackgroundAudioWorker();
       processDynamicAudioLoop();
     } catch(e) {
       console.error("setupStreamAudio error:", e);
@@ -1922,7 +2141,24 @@ To allow it in Chrome / Edge:
   }
 
   function processDynamicAudioLoop() {
-    if (!isListening) return;
+    if (!isListening) {
+      isDynamicLoopQueued = false;
+      return;
+    }
+
+    lastDynamicStepTime = performance.now();
+    processDynamicAudioFrame(false);
+
+    if (!document.hidden) {
+      isDynamicLoopQueued = true;
+      requestAnimationFrame(processDynamicAudioLoop);
+    } else {
+      isDynamicLoopQueued = false;
+    }
+  }
+
+  function processDynamicAudioFrame(isBackground = false) {
+    if (!isListening || !analyser) return;
 
     let bufLen = analyser.frequencyBinCount;
     let dataArray = new Uint8Array(bufLen);
@@ -1955,20 +2191,22 @@ To allow it in Chrome / Edge:
     if (totalEnergy < 2.5) {
       silenceFrames++;
       if (silenceFrames >= 20) {
-        updateMeters(0, 0, 0);
-        drawPausedSpectrum(canvasCtx, canvas);
-        if (badge) {
-          badge.className = 'beat-badge drop';
-          badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+        if (!isBackground) {
+          updateMeters(0, 0, 0);
+          drawPausedSpectrum(canvasCtx, canvas);
+          if (badge) {
+            badge.className = 'beat-badge drop';
+            badge.textContent = '⏸️ SPOTIFY PAUSED (LED OFF)';
+          }
+          updateVirtualLed(0, 0, 0, 0);
+        } else {
+          document.title = '⏸️ [PAUSED] ESP32 RGB PRO';
         }
-        updateVirtualLed(0, 0, 0, 0);
 
         if (!isCurrentlySilent) {
           isCurrentlySilent = true;
           dispatchDynamicBeat(0, 0, 0, 0, 60);
         }
-
-        requestAnimationFrame(processDynamicAudioLoop);
         return;
       }
     } else {
@@ -1976,19 +2214,20 @@ To allow it in Chrome / Edge:
       isCurrentlySilent = false;
     }
 
-    // 2. DRAW ACTIVE SPECTRUM
-    canvasCtx.fillStyle = '#05070c';
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    let barWidth = (canvas.width / 80) * 1.8;
-    let x = 0;
-    for (let i = 0; i < 80; i++) {
-      let barHeight = (dataArray[i] / 255) * canvas.height;
-      canvasCtx.fillStyle = `hsl(${modeHue + (i * 2.5)}, 100%, 55%)`;
-      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-      x += barWidth + 1.2;
+    // 2. DRAW ACTIVE SPECTRUM (Only draw when tab is visible to conserve GPU/battery in background!)
+    if (!isBackground) {
+      canvasCtx.fillStyle = '#05070c';
+      canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+      let barWidth = (canvas.width / 80) * 1.8;
+      let x = 0;
+      for (let i = 0; i < 80; i++) {
+        let barHeight = (dataArray[i] / 255) * canvas.height;
+        canvasCtx.fillStyle = `hsl(${modeHue + (i * 2.5)}, 100%, 55%)`;
+        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        x += barWidth + 1.2;
+      }
+      updateMeters(kick, mids, treble);
     }
-
-    updateMeters(kick, mids, treble);
 
     recentEnergy.push(totalEnergy);
     if (recentEnergy.length > 25) recentEnergy.shift();
@@ -1997,11 +2236,15 @@ To allow it in Chrome / Edge:
     // 3. SUDDEN MUSICAL BEAT DROP (Dramatic Blackout on Big Drop)
     let isDrop = (recentEnergy.length > 12 && totalEnergy < avgRecent * 0.35 && totalEnergy < 25);
     if (isDrop) {
-      if (badge) {
-        badge.className = 'beat-badge drop';
-        badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+      if (!isBackground) {
+        if (badge) {
+          badge.className = 'beat-badge drop';
+          badge.textContent = '🤫 BEAT DROP (BLACKOUT)';
+        }
+        updateVirtualLed(0, 0, 0, 0);
+      } else {
+        document.title = '🤫 [DROP] ESP32 RGB PRO';
       }
-      updateVirtualLed(0, 0, 0, 0);
       dispatchDynamicBeat(0, 0, 0, 0, 70);
     }
     // 4. MULTI-LEVEL DYNAMIC BEAT DETECTION (Low Beats, Snares, and Heavy Kicks)
@@ -2034,31 +2277,45 @@ To allow it in Chrome / Edge:
           intensity = Math.round(210 + normKick * 45);
           decayMs = activeDecay;
           [r, g, b] = getMusicModeColor(true, kick, mids, treble);
-          if (badge) {
-            badge.className = 'beat-badge peak';
-            badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
+          if (!isBackground) {
+            if (badge) {
+              badge.className = 'beat-badge peak';
+              badge.textContent = `🔥 HEAVY BEAT (Kick Peak ${intensity})`;
+            }
+          } else {
+            document.title = '🔥 [BEAT] ESP32 RGB PRO';
           }
         } else if (isSnareClap) {
           // 🥁 SNARE / RHYTHM: Crisp, snappy strike (140 to 200 brightness)
           intensity = Math.round(140 + normMid * 60);
           decayMs = Math.round(activeDecay * 0.75);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          if (badge) {
-            badge.className = 'beat-badge normal';
-            badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
+          if (!isBackground) {
+            if (badge) {
+              badge.className = 'beat-badge normal';
+              badge.textContent = `🥁 SNARE / CLAP (Power ${intensity})`;
+            }
+          } else {
+            document.title = '✨ [SNARE] ESP32 RGB PRO';
           }
         } else {
           // 🫧 LOW / SOFT BEAT: Subtle mellow glow (75 to 135 brightness)
           intensity = Math.round(75 + normKick * 60);
           decayMs = Math.round(activeDecay * 0.60);
           [r, g, b] = getMusicModeColor(false, kick, mids, treble);
-          if (badge) {
-            badge.className = 'beat-badge normal';
-            badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
+          if (!isBackground) {
+            if (badge) {
+              badge.className = 'beat-badge normal';
+              badge.textContent = `🫧 GROOVE BEAT (Glow ${intensity})`;
+            }
+          } else {
+            document.title = '🎵 [GROOVE] ESP32 RGB PRO';
           }
         }
 
-        updateVirtualLed(r, g, b, intensity);
+        if (!isBackground) {
+          updateVirtualLed(r, g, b, intensity);
+        }
 
         if (syncOffsetMs > 0) {
           setTimeout(() => { dispatchDynamicBeat(r, g, b, intensity, decayMs); }, syncOffsetMs);
@@ -2070,12 +2327,12 @@ To allow it in Chrome / Edge:
         lastBeatTimestamp = now;
         let [r, g, b] = getMusicModeColor(false, kick, mids, treble);
         let ambientIntensity = Math.min(65, Math.max(30, Math.round(totalEnergy * 0.8)));
-        updateVirtualLed(r, g, b, ambientIntensity);
+        if (!isBackground) {
+          updateVirtualLed(r, g, b, ambientIntensity);
+        }
         dispatchDynamicBeat(r, g, b, ambientIntensity, 240);
       }
     }
-
-    requestAnimationFrame(processDynamicAudioLoop);
   }
 
   function drawPausedSpectrum(ctx, c) {
