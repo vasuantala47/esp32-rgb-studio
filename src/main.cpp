@@ -850,17 +850,53 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- 🎛️ VOCAL WEIGHT, DYNAMIC RANGE & SPIKE DYNAMICS STUDIO -->
+    <!-- 🎛️ DYNAMIC AUDIO CUSTOMIZATION STUDIO (BASS, VOCALS, RANGE, SPIKE & CHROMA) -->
     <div class="card" style="border-color: rgba(236, 72, 153, 0.35); background: linear-gradient(180deg, rgba(80, 7, 36, 0.25), var(--card-bg));">
       <div class="card-title" style="color:#f472b6;">
-        <span>🎛️ Vocal Weight & Spike Dynamics Studio</span>
-        <span class="status-pill" style="background:rgba(236,72,153,0.15); color:#f472b6; border-color:rgba(236,72,153,0.3); font-size:0.65rem;">PRO AUDIO</span>
+        <span>🎛️ Audio Customization Studio</span>
+        <span class="status-pill" id="studio-master-status" style="background:rgba(16,185,129,0.15); color:#34d399; border-color:rgba(16,185,129,0.3); font-size:0.65rem;">● CUSTOM ACTIVE</span>
       </div>
 
-      <!-- 🎙️ 1. VOCAL WEIGHT & LEAD SINGER ISOLATOR -->
+      <!-- MASTER ON/OFF BUTTON FOR CUSTOMIZE -->
+      <button class="btn-sync-toggle active" id="btn-studio-master" onclick="toggleStudioMaster()" style="margin-bottom:12px; background:linear-gradient(135deg, #10b981, #059669); font-size:0.8rem; padding:10px;">
+        <span id="studio-master-icon">🎛️</span>
+        <span id="studio-master-text">CUSTOM STUDIO ENGINE: ON (Click to Bypass)</span>
+      </button>
+
+      <!-- 🥁 1. BASS & SUB-BASS STUDIO (CUSTOMIZABLE BASS) -->
       <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:700; color:#ef4444; font-size:0.75rem;">🥁 Custom Bass & Sub-Bass Tuning</span>
+          <label style="display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text); cursor:pointer;">
+            <input type="checkbox" id="chk-bass-enable" checked onchange="onBassEnableChange(this.checked)">
+            <span style="color:#fca5a5; font-weight:700;">Active</span>
+          </label>
+        </div>
         <div class="slider-header" style="margin-bottom:6px;">
-          <span style="font-weight:700; color:#f472b6;">🎙️ Vocal Weight & Prominence (Mid-High Voice)</span>
+          <span style="color:var(--subtext); font-size:0.7rem;">Bass Weight (0.5x - 3.5x Kick Multiplier):</span>
+          <b id="bass-weight-display" style="color:#ef4444;">1.5x (Punchy Sub-Bass)</b>
+        </div>
+        <input type="range" id="bass-weight-slider" min="5" max="35" value="15" step="1" oninput="onBassWeightChange(this.value)">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:0.72rem;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="chk-bass-boost" onchange="onBassBoostChange(this.checked)">
+            <span style="color:#fca5a5; font-weight:700;">⚡ 808 Sub-Bass Punch (&lt;90Hz extra depth)</span>
+          </label>
+          <span style="color:var(--subtext); font-size:0.68rem;">Deep kick resonance</span>
+        </div>
+      </div>
+
+      <!-- 🎙️ 2. VOCAL WEIGHT & LEAD SINGER ISOLATOR -->
+      <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:700; color:#f472b6; font-size:0.75rem;">🎙️ Custom Vocal Tuning</span>
+          <label style="display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text); cursor:pointer;">
+            <input type="checkbox" id="chk-vocal-enable" checked onchange="onVocalEnableChange(this.checked)">
+            <span style="color:#fce7f3; font-weight:700;">Active</span>
+          </label>
+        </div>
+        <div class="slider-header" style="margin-bottom:6px;">
+          <span style="color:var(--subtext); font-size:0.7rem;">Vocal Weight (0.5x - 3.5x Voice Prominence):</span>
           <b id="vocal-weight-display" style="color:#f472b6;">1.8x (Punchy Vocals)</b>
         </div>
         <input type="range" id="vocal-weight-slider" min="5" max="35" value="18" step="1" oninput="onVocalWeightChange(this.value)">
@@ -873,11 +909,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- 📈 2. DYNAMIC BRIGHTNESS RANGE (FLOOR & CEILING) -->
+      <!-- 📈 3. DYNAMIC BRIGHTNESS RANGE (FLOOR & CEILING) -->
       <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span style="font-weight:700; color:#38bdf8; font-size:0.75rem;">📈 Song Reaction Brightness Range</span>
-          <b id="range-summary-display" style="color:#38bdf8; font-size:0.75rem;">0% - 100%</b>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <b id="range-summary-display" style="color:#38bdf8; font-size:0.75rem;">0% - 100%</b>
+            <label style="display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text); cursor:pointer;">
+              <input type="checkbox" id="chk-range-enable" checked onchange="onRangeEnableChange(this.checked)">
+              <span style="color:#bae6fd; font-weight:700;">Active</span>
+            </label>
+          </div>
         </div>
         <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
           Set minimum ambient low and maximum peak spike (e.g. <b>70% to 98%</b>):
@@ -923,10 +965,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- ⚡ 3. 3-STAGE SPIKE DYNAMICS (BEFORE, DURING, AFTER) -->
+      <!-- ⚡ 4. 3-STAGE SPIKE DYNAMICS & MULTICOLOUR PROTECTION -->
       <div style="margin-bottom:12px; padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
-        <div style="font-weight:700; color:#fbbf24; font-size:0.75rem; margin-bottom:4px;">
-          ⚡ 3-Stage Spike Dynamics (Before, During & After Reaction)
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-weight:700; color:#fbbf24; font-size:0.75rem;">⚡ 3-Stage Spike Dynamics</span>
+          <label style="display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text); cursor:pointer;">
+            <input type="checkbox" id="chk-spike-enable" checked onchange="onSpikeEnableChange(this.checked)">
+            <span style="color:#fde68a; font-weight:700;">Active</span>
+          </label>
         </div>
         <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
           Tension build-up radar, climax explosive strike, and customizable harmonic decay:
@@ -938,8 +984,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
             <span style="color:#fde68a;"><b>Stage 1 (Before Spike):</b> Tension Radar Shimmer (Pre-drop build-up pulse)</span>
           </label>
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" id="chk-spike-white-strobe" checked onchange="onSpikeWhiteStrobeChange(this.checked)">
-            <span style="color:#ffffff;"><b>Stage 2 (During Spike):</b> Climax Impact (Crisp white kick flash on heavy hits)</span>
+            <input type="checkbox" id="chk-spike-force-multicolor" checked onchange="onSpikeMulticolorChange(this.checked)">
+            <span style="color:#67e8f9; font-weight:700;"><b>Stage 2 (During Spike):</b> 🎨 Rich Multicolor Priority (Keeps colors alive on beats)</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="chk-spike-white-strobe" onchange="onSpikeWhiteStrobeChange(this.checked)">
+            <span style="color:#ffffff;">✨ Rare Strobe White on Extreme Climax Only (&gt;95% mega drops)</span>
           </label>
         </div>
 
@@ -954,14 +1004,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- 🌈 4. CHROMA PITCH STUDIO (CUSTOMIZABLE PITCH DETECTION) -->
+      <!-- 🌈 5. CHROMA PITCH & MULTICOLOUR STUDIO -->
       <div style="padding:10px; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid var(--card-border);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-weight:700; color:#a78bfa; font-size:0.75rem;">🌈 Chroma Pitch Studio (Custom Musical Tuning)</span>
-          <span id="chroma-note-live" class="status-pill" style="background:rgba(167,139,250,0.2); color:#c4b5fd; border-color:rgba(167,139,250,0.4); font-size:0.68rem;">🎵 A4 • 440 Hz</span>
+          <span style="font-weight:700; color:#a78bfa; font-size:0.75rem;">🌈 Chroma Pitch & Multicolor Studio</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span id="chroma-note-live" class="status-pill" style="background:rgba(167,139,250,0.2); color:#c4b5fd; border-color:rgba(167,139,250,0.4); font-size:0.68rem;">🎵 A4 • 440 Hz</span>
+            <label style="display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text); cursor:pointer;">
+              <input type="checkbox" id="chk-chroma-enable" checked onchange="onChromaEnableChange(this.checked)">
+              <span style="color:#ddd6fe; font-weight:700;">Active</span>
+            </label>
+          </div>
         </div>
         <div style="font-size:0.7rem; color:var(--subtext); margin-bottom:8px;">
-          Maps every note & singer pitch directly to your custom harmonic color wheel:
+          Maps every note & melody to rich multicolors, including pure white diamond sparkle:
+        </div>
+
+        <div style="margin-bottom:8px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.72rem; cursor:pointer;">
+            <input type="checkbox" id="chk-chroma-white-sparkle" checked onchange="onChromaWhiteSparkleChange(this.checked)">
+            <span style="color:#ffffff; font-weight:700;">✨ Include Diamond White Accents with Multicolors (Treble & Claps)</span>
+          </label>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
@@ -985,10 +1048,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
           Chroma Color Palette Themes:
         </div>
         <div class="genre-chips" style="margin-top:2px;">
-          <span class="genre-chip active" id="chroma-pal-spectrum" onclick="setChromaPalette('spectrum')">🌈 Full 360° Spectrum</span>
+          <span class="genre-chip active" id="chroma-pal-flow" onclick="setChromaPalette('flow')">🌈 Multicolor Flow (Rainbow + White)</span>
+          <span class="genre-chip" id="chroma-pal-spectrum" onclick="setChromaPalette('spectrum')">🎼 Full 360° Spectrum</span>
           <span class="genre-chip" id="chroma-pal-cyber" onclick="setChromaPalette('cyber')">🌆 Cyber Neon</span>
           <span class="genre-chip" id="chroma-pal-sunset" onclick="setChromaPalette('sunset')">🌅 Sunset Heat</span>
-          <span class="genre-chip" id="chroma-pal-fifths" onclick="setChromaPalette('fifths')">🎼 Circle of Fifths</span>
+          <span class="genre-chip" id="chroma-pal-fifths" onclick="setChromaPalette('fifths')">🎹 Circle of Fifths</span>
         </div>
       </div>
     </div>
@@ -1486,22 +1550,39 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   }
 
   // ====================================================================
-  // 🎛️ VOCAL WEIGHT, DYNAMIC RANGE, SPIKE DYNAMICS & CHROMA STUDIO STATE
+  // 🎛️ DYNAMIC AUDIO CUSTOMIZATION STUDIO STATE & MASTER CONTROLS
   // ====================================================================
+  let isCustomStudioActive = true;
+  let isBassCustomActive = true;
+  let isVocalCustomActive = true;
+  let isRangeCustomActive = true;
+  let isSpikeCustomActive = true;
+  let isChromaCustomActive = true;
+
+  // Bass Studio
+  let bassWeight = 1.5;
+  let isBassBoost = false;
+
+  // Vocal Studio
   let vocalWeight = 1.8;
   let isVocalSpotlight = false;
 
+  // Range Studio
   let brightnessFloor = 0;       // 0% to 90%
   let brightnessCeiling = 100;    // 40% to 100%
   let keepFloorOnSilence = false;
 
+  // Spike Dynamics
   let enableSpikeAnticipation = true;
-  let enableSpikeWhiteStrobe = true;
+  let enableSpikeMulticolor = true;  // 🎨 True: Keeps rich colors alive!
+  let enableSpikeWhiteStrobe = false; // ✨ False: Prevents flat white drowning
   let activeSpikeCurve = 'harmonic'; // 'harmonic', 'snappy', 'ripple', 'bloom'
 
+  // Chroma Pitch & Multicolor Studio
   let chromaRootOffset = 0;       // 0° to 360°
   let chromaOctaveSpread = 1.0;   // 0.5x to 2.5x
-  let activeChromaPalette = 'spectrum'; // 'spectrum', 'cyber', 'sunset', 'fifths'
+  let activeChromaPalette = 'flow'; // 'flow' (multicolor flow), 'spectrum', 'cyber', 'sunset', 'fifths'
+  let includeWhiteSparkles = true; // ✨ Include diamond white accents with multicolors!
   let detectedPitchNote = '--';
   let detectedPitchFreq = 0;
   let detectedPitchMidi = 60;
@@ -1512,6 +1593,57 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   let energyHistory = [];
   let vocalHistory = [];
   let kickHistory = [];
+
+  // Master Studio ON/OFF Toggle
+  function toggleStudioMaster() {
+    isCustomStudioActive = !isCustomStudioActive;
+    let btn = document.getElementById('btn-studio-master');
+    let pill = document.getElementById('studio-master-status');
+    let txt = document.getElementById('studio-master-text');
+    if (isCustomStudioActive) {
+      if (btn) {
+        btn.classList.add('active');
+        btn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+      }
+      if (txt) txt.textContent = 'CUSTOM STUDIO ENGINE: ON (Click to Bypass)';
+      if (pill) {
+        pill.textContent = '● CUSTOM ACTIVE';
+        pill.style.background = 'rgba(16,185,129,0.15)';
+        pill.style.color = '#34d399';
+        pill.style.borderColor = 'rgba(16,185,129,0.3)';
+      }
+    } else {
+      if (btn) {
+        btn.classList.remove('active');
+        btn.style.background = 'rgba(239,68,68,0.2)';
+      }
+      if (txt) txt.textContent = 'CUSTOM STUDIO ENGINE: OFF (Bypassed to Raw)';
+      if (pill) {
+        pill.textContent = '⚪ BYPASS (RAW)';
+        pill.style.background = 'rgba(239,68,68,0.15)';
+        pill.style.color = '#fca5a5';
+        pill.style.borderColor = 'rgba(239,68,68,0.3)';
+      }
+    }
+  }
+
+  // Section ON/OFF Handlers
+  function onBassEnableChange(checked) { isBassCustomActive = checked; }
+  function onVocalEnableChange(checked) { isVocalCustomActive = checked; }
+  function onRangeEnableChange(checked) { isRangeCustomActive = checked; }
+  function onSpikeEnableChange(checked) { isSpikeCustomActive = checked; }
+  function onChromaEnableChange(checked) { isChromaCustomActive = checked; }
+
+  // Studio Handlers: Bass Weight & Boost
+  function onBassWeightChange(val) {
+    bassWeight = parseFloat(val) / 10.0;
+    let disp = document.getElementById('bass-weight-display');
+    if (disp) disp.textContent = bassWeight.toFixed(1) + 'x ' + (bassWeight > 2.0 ? '(Heavy 808 Bass)' : (bassWeight < 1.0 ? '(Subtle Bass)' : '(Punchy Sub-Bass)'));
+  }
+
+  function onBassBoostChange(checked) {
+    isBassBoost = checked;
+  }
 
   // Studio Handlers: Vocal Weight & Spotlight
   function onVocalWeightChange(val) {
@@ -1585,6 +1717,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   }
 
   function applyBrightnessRange(rawIntensity, isSilent = false) {
+    if (!isCustomStudioActive || !isRangeCustomActive) {
+      if (isSilent) return 0;
+      return Math.min(255, Math.max(0, Math.round(rawIntensity)));
+    }
     if (isSilent) {
       if (!keepFloorOnSilence) return 0;
       return Math.round((brightnessFloor / 100.0) * 255.0);
@@ -1601,6 +1737,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     enableSpikeAnticipation = checked;
   }
 
+  function onSpikeMulticolorChange(checked) {
+    enableSpikeMulticolor = checked;
+  }
+
   function onSpikeWhiteStrobeChange(checked) {
     enableSpikeWhiteStrobe = checked;
   }
@@ -1612,6 +1752,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   }
 
   // Studio Handlers: Chroma Pitch Studio
+  function onChromaWhiteSparkleChange(checked) {
+    includeWhiteSparkles = checked;
+  }
+
   function onChromaOffsetChange(val) {
     chromaRootOffset = parseInt(val);
     let disp = document.getElementById('chroma-offset-display');
@@ -1634,17 +1778,34 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   function detectPitch(dataArray, sampleRate) {
+    // Scan across melody, vocal & lead instrument range (Bins 2 to 42: ~300 Hz to 3.8 kHz)
     let maxVal = 0, maxBin = 0;
-    for (let i = 1; i <= 45; i++) {
-      if (dataArray[i] > maxVal) {
-        maxVal = dataArray[i];
+    let totalPower = 0, weightedBinSum = 0;
+    for (let i = 2; i <= 42; i++) {
+      let v = dataArray[i];
+      totalPower += v;
+      weightedBinSum += i * v;
+      if (v > maxVal) {
+        maxVal = v;
         maxBin = i;
       }
     }
-    if (maxVal < 25) return { note: '--', freq: 0, midi: 60, noteIndex: 0 };
+    // Sub-bass fallback if melody is quiet
+    if (maxVal < 20) {
+      for (let i = 0; i <= 3; i++) {
+        if (dataArray[i] > maxVal) {
+          maxVal = dataArray[i];
+          maxBin = i;
+        }
+      }
+    }
+    if (maxVal < 15 || totalPower < 25) return { note: '--', freq: 0, midi: 60, noteIndex: 0 };
+
     let binWidth = sampleRate / 256.0;
-    let freq = Math.round(maxBin * binWidth);
-    if (freq < 55) freq = 55;
+    let centroidBin = weightedBinSum / Math.max(1, totalPower);
+    let effectiveBin = maxBin * 0.7 + centroidBin * 0.3;
+    let freq = Math.round(effectiveBin * binWidth);
+    if (freq < 45) freq = 45;
     let midi = Math.round(12 * Math.log2(freq / 440) + 69);
     let noteIndex = (midi % 12 + 12) % 12;
     let noteName = NOTE_NAMES[noteIndex];
@@ -1652,10 +1813,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     return { note: `${noteName}${octave}`, freq, midi, noteIndex };
   }
 
-  function getChromaColor(midi, noteIdx) {
+  function getChromaColor(midi, noteIdx, kick = 0, vocals = 0, mids = 0, treble = 0) {
     let p = activeChromaPalette;
     let idx = (noteIdx !== undefined && noteIdx >= 0) ? noteIdx : (midi % 12 + 12) % 12;
-    if (p === 'spectrum') {
+
+    // ✨ Include crisp diamond white sparkle on high treble cymbal or peak vocal transients!
+    if (includeWhiteSparkles && treble > 65 && (kick > 40 || vocals > 50)) {
+      return [255, 255, 255]; // Crisp diamond white highlight included in multicolour!
+    }
+
+    if (p === 'flow') {
+      // 🌈 DYNAMIC MULTICOLOR FLOW: Shifts continuously with notes, chords & vocals!
+      let baseHue = Math.round((idx * 30 * chromaOctaveSpread + chromaRootOffset) % 360 + 360) % 360;
+      let harmonicMod = Math.round((vocals * 0.35 + mids * 0.25)) % 60;
+      let finalHue = (baseHue + harmonicMod) % 360;
+      return hsvToRgb(finalHue, 1.0, 1.0);
+    } else if (p === 'spectrum') {
       let hue = Math.round((idx * 30 * chromaOctaveSpread + chromaRootOffset) % 360 + 360) % 360;
       return hsvToRgb(hue, 1.0, 1.0);
     } else if (p === 'cyber') {
@@ -1715,7 +1888,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
   }
 
-  function getMusicModeColor(isHeavy, kick, vocals, mids, treble) {
+  function getMusicModeColor(isHeavy, kick = 0, vocals = 0, mids = 0, treble = 0) {
     modeBeatCount++;
     let m = activeMusicMode;
 
@@ -1725,7 +1898,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         let h = (modeBeatCount % 6 < 3) ? 345 : 38; // Rose Gold / Warm Amber
         return hsvToRgb(h, 0.95, 1.0);
       } else if (detectedFeeling === 'EDM Festival') {
-        return isHeavy ? [255, 255, 255] : [0, 245, 255]; // Pure Strobe / Electric Cyan
+        if (isHeavy) {
+          // Multicolour neon burst with occasional white strobe on 4th beat
+          return (modeBeatCount % 4 === 0) ? [255, 255, 255] : hsvToRgb((modeBeatCount * 65 + 180) % 360, 1.0, 1.0);
+        }
+        return [0, 245, 255];
       } else if (detectedFeeling === 'Trap 808 Bass') {
         let h = (modeBeatCount % 6 < 3) ? 280 : 0; // Deep Violet / Blood Red
         return hsvToRgb(h, 1.0, 1.0);
@@ -1737,7 +1914,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         return hsvToRgb(h, 1.0, 1.0);
       } else {
         // Cinematic Suspense
-        return isHeavy ? [255, 255, 255] : [220, 20, 50]; // Lightning Flash / Dark Crimson
+        if (isHeavy) {
+          return (modeBeatCount % 4 === 0) ? [255, 255, 255] : [220, 20, 50];
+        }
+        return [180, 10, 40];
       }
     } else if (m === 'cyber') {
       let h = (modeBeatCount % 8 < 4) ? 325 : 190; // Pink / Cyan
@@ -1748,15 +1928,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     } else if (m === 'disco') {
       return hsvToRgb((modeBeatCount * 45) % 360, 1.0, 1.0);
     } else if (m === 'edm') {
-      return isHeavy ? [255, 255, 255] : [0, 170, 255]; // Strobe White on Kick, Electric Blue
+      // Dynamic multicolor EDM cycle with white punch accent
+      if (isHeavy) {
+        return (modeBeatCount % 3 === 0) ? [255, 255, 255] : hsvToRgb((modeBeatCount * 75 + 190) % 360, 1.0, 1.0);
+      }
+      return [0, 170, 255];
     } else if (m === 'thrill') {
-      return isHeavy ? [255, 255, 255] : [255, 0, 10]; // Lightning flash on Heavy, Blood Red
+      if (isHeavy) {
+        return (modeBeatCount % 4 === 0) ? [255, 255, 255] : [255, 20, 80];
+      }
+      return [255, 0, 10];
     } else if (m === 'zen') {
       let h = (modeBeatCount % 6 < 3) ? 275 : 160; // Violet / Seafoam
       return hsvToRgb(h, 0.75, 1.0);
     } else if (m === 'pitch') {
-      // 🌈 CUSTOMIZABLE CHROMA PITCH ENGINE
-      return getChromaColor(detectedPitchMidi, detectedPitchNoteIndex);
+      // 🌈 CUSTOMIZABLE CHROMA PITCH ENGINE: Tracks melodic note & passes dynamic bands
+      return getChromaColor(detectedPitchMidi, detectedPitchNoteIndex, kick, vocals, mids, treble);
     } else if (m === 'ocean') {
       let h = (modeBeatCount % 8 < 4) ? 215 : 175; // Navy / Teal
       return hsvToRgb(h, 0.95, 1.0);
@@ -1769,7 +1956,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     } else if (m === 'gold') {
       return [255, 195, 80]; // Warm 2700K Audiophile Gold
     } else if (m === 'ice') {
-      return isHeavy ? [255, 255, 255] : [120, 220, 255]; // Frost White / Crystal Blue
+      if (isHeavy) {
+        return (modeBeatCount % 3 === 0) ? [255, 255, 255] : [0, 220, 255];
+      }
+      return [120, 220, 255];
     } else if (m === 'free') {
       // 🎨 Free Custom Beat Color: User's chosen exact color!
       let isWhiteKick = document.getElementById('chk-free-white-kick')?.checked;
@@ -2528,13 +2718,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
     // 1. 4-Band Multi-Instrument Extraction:
     // Sub-bass & Kicks (Bins 0-3: ~0-280 Hz)
-    let kick = (dataArray[0] + dataArray[1] + dataArray[2] + dataArray[3]) / 4;
+    let rawKick = (dataArray[0] + dataArray[1] + dataArray[2] + dataArray[3]) / 4;
+    let bMult = (isCustomStudioActive && isBassCustomActive) ? (bassWeight * (isBassBoost ? 1.45 : 1.0)) : 1.0;
+    let kick = Math.min(255, Math.round(rawKick * bMult));
 
     // Lead Vocals & Voice Formants (Bins 3-18: ~300-1400 Hz)
     let vocalSum = 0;
     for (let i = 3; i <= 18; i++) vocalSum += dataArray[i];
     let vocalRaw = vocalSum / 16;
-    let vocals = Math.min(255, Math.round(vocalRaw * vocalWeight));
+    let vMult = (isCustomStudioActive && isVocalCustomActive) ? vocalWeight : 1.0;
+    let vocals = Math.min(255, Math.round(vocalRaw * vMult));
 
     // Rhythm, Chords & Synths (Bins 6-22: ~500-1900 Hz)
     let midsSum = 0;
@@ -2707,7 +2900,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       // Detection tests:
       let isHeavyKick = (kickRatio > (1.18 / sens) && kick > 12) || (normKick > 0.72);
       let isSnareClap = !isHeavyKick && ((midRatio > (1.14 / sens) && mids > 10) || (normMid > 0.65));
-      let isVocalLeadHit = !isHeavyKick && !isSnareClap && isVocalSpotlight && (vocals > 45 && vocals > kick * 1.1);
+      let isVocalLeadHit = !isHeavyKick && !isSnareClap && (isCustomStudioActive && isVocalCustomActive && isVocalSpotlight) && (vocals > 45 && vocals > kick * 1.1);
       let isLowBeat   = !isHeavyKick && !isSnareClap && !isVocalLeadHit && ((kickRatio > (1.05 / sens) && kick > 6) || (normKick > 0.28 && (now - lastBeatTimestamp > 140)));
 
       let beatHit = isHeavyKick || isSnareClap || isVocalLeadHit || isLowBeat;
@@ -2723,7 +2916,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         if (isHeavyKick) {
           // 🔥 STAGE 2 (DURING SPIKE): Explosive Impact
           rawIntensity = Math.round(210 + normKick * 45);
-          if (enableSpikeWhiteStrobe) {
+          // Prioritize dynamic multicolors; white strobe fires only when explicitly enabled AND on extreme drops (>94%) AND not in chroma pitch mode
+          if (enableSpikeWhiteStrobe && !enableSpikeMulticolor && normKick > 0.94 && activeMusicMode !== 'pitch') {
             [r, g, b] = [255, 255, 255]; // Crisp white flash on peak kick drop
           } else {
             [r, g, b] = getMusicModeColor(true, kick, vocals, mids, treble);
@@ -2783,19 +2977,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         }
 
         // STAGE 3 (AFTER SPIKE): Customizable Harmonic Reverb Tail
-        if (activeSpikeCurve === 'harmonic') {
-          decayMs = Math.round(activeDecay * 1.15); // Smooth analog fade
-        } else if (activeSpikeCurve === 'snappy') {
-          decayMs = Math.round(activeDecay * 0.55); // Rapid club drop-off
-        } else if (activeSpikeCurve === 'ripple') {
-          decayMs = Math.round(activeDecay * 0.80);
-          // Secondary echo ripple bounce
-          let rippleIntensity = applyBrightnessRange(Math.round(rawIntensity * 0.55), false);
-          setTimeout(() => {
-            dispatchDynamicBeat(r, g, b, rippleIntensity, 180);
-          }, 130);
-        } else if (activeSpikeCurve === 'bloom') {
-          decayMs = Math.round(activeDecay * 1.45); // Lingering vocal bloom
+        if (isCustomStudioActive && isSpikeCustomActive) {
+          if (activeSpikeCurve === 'harmonic') {
+            decayMs = Math.round(activeDecay * 1.15); // Smooth analog fade
+          } else if (activeSpikeCurve === 'snappy') {
+            decayMs = Math.round(activeDecay * 0.55); // Rapid club drop-off
+          } else if (activeSpikeCurve === 'ripple') {
+            decayMs = Math.round(activeDecay * 0.80);
+            // Secondary echo ripple bounce
+            let rippleIntensity = applyBrightnessRange(Math.round(rawIntensity * 0.55), false);
+            setTimeout(() => {
+              dispatchDynamicBeat(r, g, b, rippleIntensity, 180);
+            }, 130);
+          } else if (activeSpikeCurve === 'bloom') {
+            decayMs = Math.round(activeDecay * 1.45); // Lingering vocal bloom
+          }
+        } else {
+          decayMs = activeDecay;
         }
 
         // Apply User's Custom Brightness Range [Floor% - Ceiling%]
@@ -3031,7 +3229,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   updateRangeWindowUI();
 </script>
 </body>
-</html>)rawliteral";
+</html>
+)rawliteral";
 
 // ====================================================================
 // 🌐 WEB SERVER API HANDLERS
