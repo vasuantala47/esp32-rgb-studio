@@ -28,8 +28,38 @@ ESP32_WIFI_IPS = ["10.206.3.219", "esp32-rgb.local", "192.168.4.1"]
 ser = None
 ser_lock = threading.Lock()
 
+def try_connect_serial():
+    global ser
+    if ser and ser.is_open:
+        return True
+    try:
+        import serial
+        import serial.tools.list_ports
+        all_ports = list(serial.tools.list_ports.comports())
+        target_port = None
+        for p in all_ports:
+            if p.device == ESP32_DEFAULT_COM:
+                target_port = p.device
+                break
+        if not target_port:
+            for p in all_ports:
+                desc = p.description.lower()
+                hwid = str(p.hwid).lower()
+                if "bluetooth" not in desc and ("usb" in desc or "cp210" in desc or "ch340" in desc or "jtag" in desc or "303a" in hwid):
+                    target_port = p.device
+                    break
+        if target_port:
+            ser = serial.Serial(target_port, 115200, timeout=0.05, write_timeout=0.1)
+            ser.dtr = False
+            ser.rts = False
+            print(f"⚡ [USB Serial] Connected to ESP32 on {target_port} @ 115200 baud!", flush=True)
+            return True
+    except Exception as e:
+        ser = None
+    return False
+
 def start_serial_reader():
-    """Background thread to drain incoming serial data from ESP32 so USB buffer never blocks."""
+    """Background thread to drain incoming serial data from ESP32 and auto-reconnect on disconnect."""
     def reader_loop():
         global ser
         while True:
@@ -41,9 +71,18 @@ def start_serial_reader():
                     else:
                         time.sleep(0.02)
                 else:
-                    time.sleep(0.5)
+                    if try_connect_serial():
+                        time.sleep(0.5)
+                    else:
+                        time.sleep(2.0)
             except Exception:
-                time.sleep(0.5)
+                try:
+                    if ser:
+                        ser.close()
+                except Exception:
+                    pass
+                ser = None
+                time.sleep(2.0)
 
     t = threading.Thread(target=reader_loop, daemon=True)
     t.start()
@@ -51,45 +90,13 @@ def start_serial_reader():
 try:
     import serial
     import serial.tools.list_ports
-    
-    # Auto-detect ESP32 USB COM port (strictly ignore virtual Bluetooth ports)
-    target_port = None
-    all_ports = list(serial.tools.list_ports.comports())
-    
-    # Priority 1: Check if COM3 exists and is USB
-    for p in all_ports:
-        if p.device == ESP32_DEFAULT_COM:
-            target_port = p.device
-            break
-            
-    # Priority 2: Check for any genuine USB Serial device
-    if not target_port:
-        for p in all_ports:
-            desc = p.description.lower()
-            hwid = str(p.hwid).lower()
-            if "bluetooth" not in desc and ("usb" in desc or "cp210" in desc or "ch340" in desc or "jtag" in desc or "303a" in hwid):
-                target_port = p.device
-                break
-
-    if target_port:
-        try:
-            ser = serial.Serial(target_port, 115200, timeout=0.05, write_timeout=0.1)
-            ser.dtr = False
-            ser.rts = False
-            print(f"⚡ [USB Serial] Connected to ESP32 on {target_port} @ 115200 baud!")
-            print("🚀 Commands and beats will be transmitted directly over USB with 0.2ms latency.")
-            print("🌐 Laptop Wi-Fi is 100% FREE for high-speed Internet (Spotify & Gemini AI)!")
-            start_serial_reader()
-        except Exception as e:
-            print(f"⚠️ Could not open serial port {target_port}: {e}")
-            print("ℹ️ Falling back to Wi-Fi proxy mode.")
-            ser = None
+    if try_connect_serial():
+        print("🚀 Commands and beats will stream directly over USB Serial (0.2ms latency).", flush=True)
     else:
-        print("ℹ️ No USB Serial device found. Running in Wi-Fi proxy mode.")
+        print("ℹ️ USB Serial not immediately available. Running in hybrid/auto-reconnect mode.", flush=True)
+    start_serial_reader()
 except ImportError:
-    print("ℹ️ pyserial not found in this python environment.")
-    print("ℹ️ If ESP32 is on USB, run with PlatformIO python: & \"$HOME\\.platformio\\penv\\Scripts\\python.exe\" serve.py")
-    ser = None
+    print("ℹ️ pyserial not found in this environment. Running in Wi-Fi proxy mode.", flush=True)
 
 # Locate index.html
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -348,22 +355,26 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 def run_server():
-    # Allow port reuse to avoid 'Address already in use' errors on fast restart
     socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", PORT), StudioHandler) as httpd:
-        print("\n" + "="*60)
-        print("   ✨ ESP32 AI RGB PRO STUDIO - LAPTOP BRIDGE ACTIVE!   ")
-        print("="*60)
-        print(f"👉 Local Web Studio:   http://localhost:{PORT}")
-        print("="*60)
-        print("💡 Keep this terminal open while using the Studio.")
-        print("💡 All commands stream over USB Serial directly to the LED!\n")
+    while True:
         try:
-            httpd.serve_forever()
+            with socketserver.TCPServer(("", PORT), StudioHandler) as httpd:
+                print("\n" + "="*60, flush=True)
+                print("   ✨ ESP32 AI RGB PRO STUDIO - LAPTOP BRIDGE ACTIVE!   ", flush=True)
+                print("="*60, flush=True)
+                print(f"👉 Local Web Studio:   http://localhost:{PORT}", flush=True)
+                print("="*60, flush=True)
+                print("💡 Keep this terminal open while using the Studio.", flush=True)
+                print("💡 All commands stream over USB Serial directly to the LED!\n", flush=True)
+                httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\nShutting down studio server...")
+            print("\nShutting down studio server...", flush=True)
             if ser and ser.is_open:
                 ser.close()
+            break
+        except Exception as err:
+            print(f"⚠️ Server notice: {err}. Auto-restarting in 1s...", flush=True)
+            time.sleep(1)
 
 if __name__ == '__main__':
     run_server()
