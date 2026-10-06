@@ -32,11 +32,40 @@ An advanced, multi-interface RGB lighting studio and audio visualizer engineered
 
 ---
 
-## 🛠️ Hardware Requirements
+- **🚥 External 8-LED RGB Bar (Keyes ARTOU V2 Support)**:
+  - Supports the 8x 5050 RGB multiplexed module with onboard S8550 PNP transistors.
+  - Ultra-smooth 125 FPS FreeRTOS background multiplexing task on Core 1 (zero flicker, zero CPU slowdown).
+  - 6 dedicated display modes: Mirror Main WS2812, 8-LED Audio VU Meter with falling peak dots, Frequency Spectrum Flow, Traveling Rainbow Wave, Cyber Scanner (Knight Rider), and Campfire Embers.
+  - Interactive 8-LED virtual preview HUD in Web Studio.
 
-- **Microcontroller**: ESP32-S3 DevKitM-1 (or standard ESP32 / ESP32-S2 / ESP32-C3)
-- **Onboard RGB Pin**: GPIO 48 (WS2812 / NeoPixel)
-- **Connection**: USB Type-C Cable
+---
+
+## 🛠️ Hardware Requirements & Wiring
+
+### 1. ESP32-S3 Board
+- **Microcontroller**: ESP32-S3 DevKitM-1 (or standard ESP32 / S2 / C3)
+- **Onboard WS2812 RGB Pin**: GPIO 48
+- **USB Connection**: USB Type-C Cable
+
+### 2. External 8-LED RGB Bar (Keyes ARTOU LED RGB V2)
+> [!CAUTION]
+> **CRITICAL VOLTAGE RULE: CONNECT `VCC` TO 3.3V (NOT 5V)!**
+> The module uses PNP transistors with emitters tied to `VCC`. If connected to 5V, the ESP32's 3.3V logic will never turn off the transistors. Connecting `VCC` to the ESP32 **3.3V pin** guarantees complete shutoff (0V $V_{be}$) when GPIO is HIGH and full turn-on when LOW. **No external GND wire is needed** because color cathodes sink directly through ESP32 GPIOs to ground!
+
+| Module Pin | ESP32-S3 Pin | Function / Type |
+|---|---|---|
+| **VCC** | **3.3V Pin** | Power Supply (MUST be 3.3V!) |
+| **R** | **GPIO 4** | Red Cathode (20 kHz PWM Channel 0, Active LOW) |
+| **G** | **GPIO 5** | Green Cathode (20 kHz PWM Channel 1, Active LOW) |
+| **B** | **GPIO 6** | Blue Cathode (20 kHz PWM Channel 2, Active LOW) |
+| **D0** | **GPIO 7** | Digit 0 Anode PNP (Active LOW) |
+| **D1** | **GPIO 8** | Digit 1 Anode PNP (Active LOW) |
+| **D2** | **GPIO 9** | Digit 2 Anode PNP (Active LOW) |
+| **D3** | **GPIO 10** | Digit 3 Anode PNP (Active LOW) |
+| **D4** | **GPIO 11** | Digit 4 Anode PNP (Active LOW) |
+| **D5** | **GPIO 12** | Digit 5 Anode PNP (Active LOW) |
+| **D6** | **GPIO 13** | Digit 6 Anode PNP (Active LOW) |
+| **D7** | **GPIO 14** | Digit 7 Anode PNP (Active LOW) |
 
 ---
 

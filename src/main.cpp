@@ -55,6 +55,41 @@ class MyBleRxCallbacks: public BLECharacteristicCallbacks {
 uint8_t rgbPin = PHYSICAL_RGB_PIN; // Physical GPIO 48 for onboard WS2812 RGB LED
 uint8_t masterBrightness = 100;    // 0 - 100% (Default 100% for maximum vivid punch!)
 
+// ====================================================================
+// 🌈 EXTERNAL 8-LED RGB BAR (KEYES LED RGB V2 ARTOU MULTIPLEXED MODULE)
+// ====================================================================
+#define PIN_EXT_R   4   // Color Cathode Red (Active LOW)
+#define PIN_EXT_G   5   // Color Cathode Green (Active LOW)
+#define PIN_EXT_B   6   // Color Cathode Blue (Active LOW)
+
+const uint8_t extDigitPins[8] = { 7, 8, 9, 10, 11, 12, 13, 14 }; // Digits D0-D7 Anode PNP (Active LOW)
+
+#define EXT_LEDC_CH_R 0
+#define EXT_LEDC_CH_G 1
+#define EXT_LEDC_CH_B 2
+#define EXT_LEDC_FREQ 20000 // 20 kHz ultrasonic PWM (Flicker-free & silent)
+#define EXT_LEDC_RES  8     // 8-bit resolution (0 - 255)
+
+struct ExtRGB {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
+
+ExtRGB extLeds[8] = {
+    {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
+    {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}
+};
+
+bool extRgbEnabled = true;
+uint8_t extRgbMode = 0;        // 0: Mirror Main, 1: VU Meter, 2: Spectrum Flow, 3: Rainbow Wave, 4: Cyber Scanner, 5: Fire Embers, 6: Direct Framebuffer
+uint8_t extBrightness = 100;   // 0 - 100%
+
+// VU Meter peak decay state
+float extVuLevel = 0.0f;
+float extPeakDot = 0.0f;
+unsigned long lastPeakDropTime = 0;
+
 // Wi-Fi Access Point Configuration
 const char* ap_ssid = "ESP32-RGB-Studio";
 const char* ap_pass = "12345678"; // At least 8 characters
@@ -102,12 +137,203 @@ bool menuPrinted = false;
 // ====================================================================
 // 🎨 COLOR & LED DRIVER
 // ====================================================================
+// High-Speed 1ms Multiplexer Step for 8-LED Keyes Module
+void stepExtRgbMultiplex() {
+    static uint8_t curDigit = 0;
+
+    // 1. Ghosting prevention: Disable all digits first (Active LOW -> write HIGH)
+    for (int i = 0; i < 8; i++) {
+        digitalWrite(extDigitPins[i], HIGH);
+    }
+
+    // 2. Set colors and enable current digit
+    if (extRgbEnabled && masterBrightness > 0 && extBrightness > 0) {
+        float bri = ((float)masterBrightness / 100.0f) * ((float)extBrightness / 100.0f);
+        uint8_t r = (uint8_t)(extLeds[curDigit].r * bri);
+        uint8_t g = (uint8_t)(extLeds[curDigit].g * bri);
+        uint8_t b = (uint8_t)(extLeds[curDigit].b * bri);
+
+        // Active LOW cathodes on 20kHz LEDC channels (255 - level)
+        ledcWrite(EXT_LEDC_CH_R, 255 - r);
+        ledcWrite(EXT_LEDC_CH_G, 255 - g);
+        ledcWrite(EXT_LEDC_CH_B, 255 - b);
+
+        // Turn ON current digit (Active LOW -> write LOW)
+        digitalWrite(extDigitPins[curDigit], LOW);
+    } else {
+        ledcWrite(EXT_LEDC_CH_R, 255);
+        ledcWrite(EXT_LEDC_CH_G, 255);
+        ledcWrite(EXT_LEDC_CH_B, 255);
+    }
+
+    curDigit = (curDigit + 1) % 8;
+}
+
+void extRgbMultiplexTask(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(1); // 1 millisecond
+    for (;;) {
+        stepExtRgbMultiplex();
+        vTaskDelayUntil(&xLastWakeTime, xFrequency > 0 ? xFrequency : 1);
+    }
+}
+
 void setRGB(uint8_t r, uint8_t g, uint8_t b) {
     float bri = (float)masterBrightness / 100.0f;
     uint8_t adjR = (uint8_t)(r * bri);
     uint8_t adjG = (uint8_t)(g * bri);
     uint8_t adjB = (uint8_t)(b * bri);
     neopixelWrite(rgbPin, adjR, adjG, adjB);
+
+    if (extRgbMode == 0) { // Mirror Mode: all 8 external LEDs mirror main RGB
+        for (int i = 0; i < 8; i++) {
+            extLeds[i].r = r;
+            extLeds[i].g = g;
+            extLeds[i].b = b;
+        }
+    }
+}
+
+void updateExternalRgbEffects(unsigned long now) {
+    if (!extRgbEnabled) {
+        for (int i = 0; i < 8; i++) {
+            extLeds[i].r = 0; extLeds[i].g = 0; extLeds[i].b = 0;
+        }
+        return;
+    }
+
+    if (extRgbMode == 0) {
+        // Mode 0 (Mirror): synchronized directly in setRGB()
+        return;
+    }
+
+    if (extRgbMode == 1) {
+        // 📊 Mode 1: 8-LED Audio VU Meter & Falling Peak Indicator
+        float factor = 0.0f;
+        if (currentMode == 11) {
+            unsigned long elapsed = now - lastBeatTime;
+            if (elapsed < beatDecayMs && beatIntensity >= 10) {
+                float progress = (float)elapsed / (float)beatDecayMs;
+                factor = 0.5f * (1.0f + cosf(3.14159265f * progress)) * ((float)beatIntensity / 255.0f);
+            }
+        } else {
+            factor = (sinf(now / 350.0f) + 1.0f) * 0.4f;
+        }
+
+        float targetVu = factor * 8.0f;
+        if (targetVu > extVuLevel) {
+            extVuLevel = targetVu;
+        } else {
+            extVuLevel -= 0.18f;
+            if (extVuLevel < 0) extVuLevel = 0;
+        }
+
+        if (extVuLevel >= extPeakDot) {
+            extPeakDot = extVuLevel;
+            lastPeakDropTime = now;
+        } else if (now - lastPeakDropTime > 45) {
+            extPeakDot -= 0.12f;
+            if (extPeakDot < 0) extPeakDot = 0;
+            lastPeakDropTime = now;
+        }
+
+        const ExtRGB vuColors[8] = {
+            {0, 255, 60},   // 0: Emerald Green
+            {40, 255, 20},  // 1: Lime Green
+            {120, 255, 0},  // 2: Yellow-Green
+            {230, 220, 0},  // 3: Golden Yellow
+            {255, 140, 0},  // 4: Amber Orange
+            {255, 60, 0},   // 5: Fiery Orange
+            {255, 15, 20},  // 6: Crimson Red
+            {255, 0, 110}   // 7: Peak Magenta
+        };
+
+        for (int i = 0; i < 8; i++) {
+            float ledThreshold = (float)i;
+            if (extVuLevel >= ledThreshold + 1.0f) {
+                extLeds[i] = vuColors[i];
+            } else if (extVuLevel > ledThreshold) {
+                float frac = extVuLevel - ledThreshold;
+                extLeds[i].r = (uint8_t)(vuColors[i].r * frac);
+                extLeds[i].g = (uint8_t)(vuColors[i].g * frac);
+                extLeds[i].b = (uint8_t)(vuColors[i].b * frac);
+            } else {
+                extLeds[i] = {0, 0, 0};
+            }
+
+            int peakIdx = (int)extPeakDot;
+            if (peakIdx == i && extPeakDot > 0.5f) {
+                extLeds[i] = {255, 255, 255}; // Peak Dot
+            }
+        }
+        return;
+    }
+
+    if (extRgbMode == 2) {
+        // 🌈 Mode 2: 8-LED Frequency Spectrum Flow
+        float wave = (sinf(now / 400.0f) + 1.0f) / 2.0f;
+        float beatBoost = (now - lastBeatTime < beatDecayMs) ? ((float)beatIntensity / 255.0f) : 0.2f;
+
+        // Bass zone
+        extLeds[0] = { (uint8_t)(255 * beatBoost), 0, (uint8_t)(180 * beatBoost) };
+        extLeds[1] = { (uint8_t)(220 * beatBoost), 0, (uint8_t)(220 * beatBoost) };
+
+        // Vocal / Mid zone
+        float midFactor = 0.4f + 0.6f * wave;
+        extLeds[2] = { (uint8_t)(255 * midFactor), (uint8_t)(40 * midFactor), (uint8_t)(140 * midFactor) };
+        extLeds[3] = { (uint8_t)(255 * midFactor), (uint8_t)(160 * midFactor), 0 };
+        extLeds[4] = { (uint8_t)(200 * midFactor), (uint8_t)(255 * midFactor), 0 };
+
+        // Treble zone
+        float trebFactor = 0.5f + 0.5f * cosf(now / 300.0f);
+        extLeds[5] = { 0, (uint8_t)(240 * trebFactor), (uint8_t)(255 * trebFactor) };
+        extLeds[6] = { (uint8_t)(80 * trebFactor), (uint8_t)(180 * trebFactor), 255 };
+        extLeds[7] = { (uint8_t)(255 * trebFactor), (uint8_t)(255 * trebFactor), 255 };
+        return;
+    }
+
+    if (extRgbMode == 3) {
+        // ⚡ Mode 3: 8-LED Traveling Rainbow Wave
+        for (int i = 0; i < 8; i++) {
+            float hue = fmodf((now / 10.0f) + (i * 45.0f), 360.0f);
+            float c = 1.0f;
+            float x = c * (1.0f - fabsf(fmodf(hue / 60.0f, 2.0f) - 1.0f));
+            float r = 0, g = 0, b = 0;
+            if (hue < 60)       { r = c; g = x; b = 0; }
+            else if (hue < 120) { r = x; g = c; b = 0; }
+            else if (hue < 180) { r = 0; g = c; b = x; }
+            else if (hue < 240) { r = 0; g = x; b = c; }
+            else if (hue < 300) { r = x; g = 0; b = c; }
+            else                { r = c; g = 0; b = x; }
+            extLeds[i] = { (uint8_t)(r * 255), (uint8_t)(g * 255), (uint8_t)(b * 255) };
+        }
+        return;
+    }
+
+    if (extRgbMode == 4) {
+        // 🏎️ Mode 4: 8-LED Cyber Scanner / Knight Rider
+        float pos = 3.5f + 3.5f * sinf(now / 220.0f);
+        for (int i = 0; i < 8; i++) {
+            float dist = fabsf((float)i - pos);
+            float bri = expf(-dist * 1.8f);
+            if (bri < 0.02f) bri = 0;
+            extLeds[i] = { (uint8_t)(255 * bri), (uint8_t)(15 * bri), (uint8_t)(40 * bri) };
+        }
+        return;
+    }
+
+    if (extRgbMode == 5) {
+        // 🔥 Mode 5: 8-LED Organic Campfire Embers
+        for (int i = 0; i < 8; i++) {
+            float flicker = (random(55, 100) / 100.0f);
+            float wave = (sinf((now + i * 140) / 180.0f) + 1.0f) / 2.0f;
+            uint8_t r = (uint8_t)(255 * flicker);
+            uint8_t g = (uint8_t)((35 + wave * 65) * flicker);
+            uint8_t b = (uint8_t)((wave > 0.88f ? 12 : 0) * flicker);
+            extLeds[i] = { r, g, b };
+        }
+        return;
+    }
 }
 
 void setHSV(float h, float s, float v) {
@@ -649,15 +875,35 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   </div>
 </header>
 
-<!-- Live Virtual LED Preview Orb -->
-<div class="preview-bar">
-  <div class="led-orb" id="virtual-led"></div>
-  <div class="led-info" style="flex:1;">
-    <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-      <b id="active-mode-title">Mode: Aurora Borealis</b>
-      <span class="status-pill" id="status-pill">● Mode 1 (ON)</span>
+<!-- Live Virtual LED Preview Orb & External 8-LED Bar -->
+<div class="preview-bar" style="flex-direction:column; gap:8px;">
+  <div style="display:flex; align-items:center; justify-content:center; gap:12px; width:100%;">
+    <div class="led-orb" id="virtual-led"></div>
+    <div class="led-info" style="flex:1;">
+      <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+        <b id="active-mode-title">Mode: Aurora Borealis</b>
+        <span class="status-pill" id="status-pill">● Mode 1 (ON)</span>
+      </div>
+      <span id="active-rgb-val" style="color:var(--subtext); font-size:0.75rem;">RGB(0, 0, 0)</span>
     </div>
-    <span id="active-rgb-val" style="color:var(--subtext); font-size:0.75rem;">RGB(0, 0, 0)</span>
+  </div>
+
+  <!-- 🚥 External 8-LED Bar Live HUD Strip -->
+  <div class="ext-bar-hud" style="width:100%; display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.4); padding:6px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+    <div style="display:flex; align-items:center; gap:6px;">
+      <span style="font-size:0.68rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.04em;">🚥 8-LED Bar:</span>
+      <span id="ext-bar-mode-badge" class="status-pill" style="font-size:0.62rem; padding:2px 6px; background:rgba(56,189,248,0.15); color:#7dd3fc; border-color:rgba(56,189,248,0.3);">Mirror</span>
+    </div>
+    <div class="ext-leds-strip" style="display:flex; gap:6px; align-items:center;">
+      <div class="ext-led-dot" id="ext-dot-0" title="LED 0 (D0 / GPIO 7)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-1" title="LED 1 (D1 / GPIO 8)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-2" title="LED 2 (D2 / GPIO 9)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-3" title="LED 3 (D3 / GPIO 10)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-4" title="LED 4 (D4 / GPIO 11)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-5" title="LED 5 (D5 / GPIO 12)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-6" title="LED 6 (D6 / GPIO 13)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+      <div class="ext-led-dot" id="ext-dot-7" title="LED 7 (D7 / GPIO 14)" style="width:13px; height:13px; border-radius:50%; background:#151926; border:1px solid #334155; transition:all 0.05s ease;"></div>
+    </div>
   </div>
 </div>
 
@@ -694,6 +940,84 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         </div>
         <input type="range" id="bright-slider" min="0" max="100" value="100" oninput="onBrightness(this.value)">
       </div>
+    </div>
+
+    <!-- 🚥 EXTERNAL 8-LED RGB BAR (KEYES ARTOU V2) CONTROLLER -->
+    <div class="card" style="border-color: rgba(56, 189, 248, 0.4); background: linear-gradient(180deg, rgba(14, 116, 144, 0.15), var(--card-bg));">
+      <div class="card-title" style="color:#38bdf8; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <span>🚥 External 8-LED RGB Bar (ARTOU V2)</span>
+        <span class="status-pill" id="ext-card-status" style="background:rgba(56,189,248,0.2); color:#38bdf8; border-color:rgba(56,189,248,0.4);">Active (125 FPS)</span>
+      </div>
+
+      <!-- Power & Mode Quick Toggle -->
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button id="btn-ext-power" onclick="toggleExtPower()" style="flex:1; padding:9px; border-radius:8px; font-weight:800; font-size:0.75rem; border:none; cursor:pointer; background:linear-gradient(135deg, #0284c7, #06b6d4); color:#fff; box-shadow:0 0 10px rgba(6,182,212,0.35);">
+          ⏻ Bar Power: ON
+        </button>
+        <button onclick="setExtBarMode(0)" class="lamp-preset-btn active" id="btn-quick-mirror" style="flex:1; padding:9px; border-radius:8px; font-weight:700; font-size:0.75rem; border-color:#38bdf8;">
+          🔄 Mirror Main
+        </button>
+        <button onclick="setExtBarMode(1)" class="lamp-preset-btn" id="btn-quick-vu" style="flex:1; padding:9px; border-radius:8px; font-weight:700; font-size:0.75rem;">
+          📊 8-LED VU Meter
+        </button>
+      </div>
+
+      <!-- 6 Lighting Modes Grid -->
+      <div style="font-size:0.7rem; color:var(--subtext); font-weight:700; margin-bottom:5px;">8-LED DISPLAY MODES:</div>
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:12px;">
+        <button class="lamp-preset-btn active" id="ext-mode-btn-0" onclick="setExtBarMode(0)" style="border-color:#38bdf8;">🔄 Mirror Main</button>
+        <button class="lamp-preset-btn" id="ext-mode-btn-1" onclick="setExtBarMode(1)">📊 Audio VU Meter</button>
+        <button class="lamp-preset-btn" id="ext-mode-btn-2" onclick="setExtBarMode(2)">🌈 Spectrum Flow</button>
+        <button class="lamp-preset-btn" id="ext-mode-btn-3" onclick="setExtBarMode(3)">⚡ Rainbow Wave</button>
+        <button class="lamp-preset-btn" id="ext-mode-btn-4" onclick="setExtBarMode(4)">🏎️ Cyber Scanner</button>
+        <button class="lamp-preset-btn" id="ext-mode-btn-5" onclick="setExtBarMode(5)">🔥 Campfire Embers</button>
+      </div>
+
+      <!-- Brightness Slider for External Bar -->
+      <div class="slider-box" style="margin-bottom:10px;">
+        <div class="slider-header">
+          <span>Bar Brightness</span>
+          <b id="ext-bright-val" style="color:#38bdf8;">100%</b>
+        </div>
+        <input type="range" id="ext-bright-slider" min="0" max="100" value="100" oninput="onExtBrightness(this.value)">
+      </div>
+
+      <!-- Quick Color Swatch Tests -->
+      <div style="margin-bottom:10px;">
+        <span style="font-size:0.68rem; color:var(--subtext); font-weight:700; display:block; margin-bottom:4px;">QUICK BAR COLOR TEST:</span>
+        <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:5px;">
+          <button onclick="testBarColor(255,0,0)" style="padding:6px 2px; border-radius:6px; background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; font-size:0.68rem; font-weight:700; cursor:pointer;">🔴 Red</button>
+          <button onclick="testBarColor(0,255,0)" style="padding:6px 2px; border-radius:6px; background:rgba(16,185,129,0.2); border:1px solid #10b981; color:#6ee7b7; font-size:0.68rem; font-weight:700; cursor:pointer;">🟢 Green</button>
+          <button onclick="testBarColor(0,100,255)" style="padding:6px 2px; border-radius:6px; background:rgba(6,182,212,0.2); border:1px solid #06b6d4; color:#67e8f9; font-size:0.68rem; font-weight:700; cursor:pointer;">🔵 Blue</button>
+          <button onclick="testBarColor(255,255,255)" style="padding:6px 2px; border-radius:6px; background:rgba(255,255,255,0.15); border:1px solid #fff; color:#fff; font-size:0.68rem; font-weight:700; cursor:pointer;">⚪ White</button>
+          <button onclick="testBarChaser()" style="padding:6px 2px; border-radius:6px; background:rgba(168,85,247,0.2); border:1px solid #a855f7; color:#d8b4fe; font-size:0.68rem; font-weight:700; cursor:pointer;">⚡ Chaser</button>
+        </div>
+      </div>
+
+      <!-- Hardware Wiring & Pinout Guide (Collapsible) -->
+      <details style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 10px; font-size:0.72rem;">
+        <summary style="font-weight:700; color:#38bdf8; cursor:pointer;">🔌 Module Wiring & Pinout Guide (Click to View)</summary>
+        <div style="margin-top:8px; line-height:1.5; color:var(--subtext);">
+          <div style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); padding:6px 8px; border-radius:6px; color:#fca5a5; font-weight:700; margin-bottom:8px;">
+            ⚠️ CRITICAL: Connect VCC to 3.3V (NOT 5V)! No GND wire is required.
+          </div>
+          <table style="width:100%; border-collapse:collapse; font-family:monospace; font-size:0.68rem; text-align:left; color:#f1f5f9;">
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); color:#38bdf8;">
+              <th style="padding:4px;">Module Pin</th>
+              <th style="padding:4px;">ESP32-S3 Pin</th>
+              <th style="padding:4px;">Description</th>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:4px; font-weight:700; color:#f59e0b;">VCC</td><td style="padding:4px; font-weight:700; color:#10b981;">3.3V Pin</td><td>Module Power (MUST be 3.3V!)</td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:4px; color:#ef4444;">R (Cathode)</td><td style="padding:4px;">GPIO 4</td><td>Red Color Channel</td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:4px; color:#10b981;">G (Cathode)</td><td style="padding:4px;">GPIO 5</td><td>Green Color Channel</td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:4px; color:#38bdf8;">B (Cathode)</td><td style="padding:4px;">GPIO 6</td><td>Blue Color Channel</td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:4px;">D0 - D7</td><td style="padding:4px;">GPIO 7 - 14</td><td>Digit 0 to 7 (D0=7, D1=8, ..., D7=14)</td></tr>
+          </table>
+          <p style="margin-top:6px; font-size:0.65rem; color:#94a3b8;">
+            * All 8 LEDs share the 330Ω onboard resistors. High-speed 125 FPS multiplexing keeps all LEDs at full brightness without flicker.
+          </p>
+        </div>
+      </details>
     </div>
 
     <!-- 💡 FREE AMBIENT LIGHT (SOLID LAMP - CONTINUOUS ON) -->
@@ -1408,6 +1732,207 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     if (chip) chip.style.background = hex;
     let hexVal = document.getElementById('live-color-hex');
     if (hexVal) hexVal.textContent = hex;
+
+    // 🚥 Keep External 8-LED Bar Live HUD synced!
+    updateVirtualExtBar(r, g, b, alpha);
+  }
+
+  // ====================================================================
+  // 🚥 EXTERNAL 8-LED RGB BAR (KEYES ARTOU V2) CONTROLLER
+  // ====================================================================
+  let isExtBarEnabled = true;
+  let activeExtBarMode = 0; // 0: Mirror, 1: VU Meter, 2: Spectrum, 3: Rainbow, 4: Scanner, 5: Fire
+  let extBarBrightness = 100;
+  let extVirtualVu = 0.0;
+  let extVirtualPeak = 0.0;
+  let lastExtPeakTime = 0;
+
+  function toggleExtPower() {
+    isExtBarEnabled = !isExtBarEnabled;
+    let btn = document.getElementById('btn-ext-power');
+    let status = document.getElementById('ext-card-status');
+    if (btn) {
+      if (isExtBarEnabled) {
+        btn.textContent = '⏻ Bar Power: ON';
+        btn.style.background = 'linear-gradient(135deg, #0284c7, #06b6d4)';
+      } else {
+        btn.textContent = '⏻ Bar Power: OFF';
+        btn.style.background = 'rgba(239, 68, 68, 0.2)';
+      }
+    }
+    if (status) {
+      status.textContent = isExtBarEnabled ? 'Active (125 FPS)' : 'OFF (Standby)';
+      status.style.color = isExtBarEnabled ? '#38bdf8' : '#ef4444';
+    }
+    syncExtBarHardware();
+    if (!isExtBarEnabled) {
+      renderVirtualExtBarDirect([0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0]);
+    }
+  }
+
+  function setExtBarMode(mode) {
+    activeExtBarMode = parseInt(mode);
+    for (let i = 0; i <= 5; i++) {
+      let b = document.getElementById('ext-mode-btn-' + i);
+      if (b) {
+        if (i === activeExtBarMode) {
+          b.classList.add('active');
+          b.style.borderColor = '#38bdf8';
+        } else {
+          b.classList.remove('active');
+          b.style.borderColor = 'var(--card-border)';
+        }
+      }
+    }
+    let mirrorQuick = document.getElementById('btn-quick-mirror');
+    if (mirrorQuick) {
+      if (activeExtBarMode === 0) mirrorQuick.classList.add('active');
+      else mirrorQuick.classList.remove('active');
+    }
+    let vuQuick = document.getElementById('btn-quick-vu');
+    if (vuQuick) {
+      if (activeExtBarMode === 1) vuQuick.classList.add('active');
+      else vuQuick.classList.remove('active');
+    }
+    let modeNames = ['Mirror', 'VU Meter', 'Spectrum', 'Rainbow', 'Scanner', 'Fire'];
+    let badge = document.getElementById('ext-bar-mode-badge');
+    if (badge) badge.textContent = modeNames[activeExtBarMode] || 'Mode ' + activeExtBarMode;
+    syncExtBarHardware();
+  }
+
+  function onExtBrightness(val) {
+    extBarBrightness = parseInt(val);
+    let el = document.getElementById('ext-bright-val');
+    if (el) el.textContent = extBarBrightness + '%';
+    syncExtBarHardware();
+  }
+
+  function syncExtBarHardware() {
+    let en = isExtBarEnabled ? 1 : 0;
+    let cmd = `!EXT:${en},${activeExtBarMode},${extBarBrightness}`;
+    let url = `/api/ext?en=${en}&mode=${activeExtBarMode}&bri=${extBarBrightness}`;
+    sendHardwareCommand(cmd, url);
+  }
+
+  function testBarColor(r, g, b) {
+    if (!isExtBarEnabled) toggleExtPower();
+    let data = [];
+    for (let i = 0; i < 8; i++) data.push(`${r},${g},${b}`);
+    let cmd = `!EXTD:${data.join(';')}`;
+    sendHardwareCommand(cmd, `/api/ext?mode=6`);
+    let arr = [];
+    for (let i = 0; i < 8; i++) arr.push(r, g, b);
+    renderVirtualExtBarDirect(arr);
+    let badge = document.getElementById('ext-bar-mode-badge');
+    if (badge) badge.textContent = 'Test Color';
+  }
+
+  function testBarChaser() {
+    if (!isExtBarEnabled) toggleExtPower();
+    setExtBarMode(4); // Cyber Scanner mode
+    let badge = document.getElementById('ext-bar-mode-badge');
+    if (badge) badge.textContent = 'Cyber Scanner';
+  }
+
+  function updateVirtualExtBar(r, g, b, intensity) {
+    if (!isExtBarEnabled) return;
+    let now = performance.now();
+    let normBri = (extBarBrightness / 100.0);
+
+    if (activeExtBarMode === 0) {
+      // 0: Mirror main LED across all 8 dots
+      let dotR = Math.round(r * (intensity / 255.0) * normBri);
+      let dotG = Math.round(g * (intensity / 255.0) * normBri);
+      let dotB = Math.round(b * (intensity / 255.0) * normBri);
+      let colStr = `rgb(${dotR}, ${dotG}, ${dotB})`;
+      let glowStr = (intensity > 20) ? `0 0 10px rgba(${dotR}, ${dotG}, ${dotB}, 0.8)` : 'none';
+      for (let i = 0; i < 8; i++) {
+        let dot = document.getElementById('ext-dot-' + i);
+        if (dot) {
+          dot.style.background = (dotR === 0 && dotG === 0 && dotB === 0) ? '#151926' : colStr;
+          dot.style.boxShadow = glowStr;
+          dot.style.borderColor = (intensity > 20) ? colStr : '#334155';
+        }
+      }
+    } else if (activeExtBarMode === 1) {
+      // 1: 8-LED Audio VU Meter
+      let targetVu = (intensity / 255.0) * 8.0;
+      if (targetVu > extVirtualVu) {
+        extVirtualVu = targetVu;
+      } else {
+        extVirtualVu = Math.max(0, extVirtualVu - 0.22);
+      }
+      if (extVirtualVu >= extVirtualPeak) {
+        extVirtualPeak = extVirtualVu;
+        lastExtPeakTime = now;
+      } else if (now - lastExtPeakTime > 50) {
+        extVirtualPeak = Math.max(0, extVirtualPeak - 0.15);
+        lastExtPeakTime = now;
+      }
+
+      const vuCols = [
+        [0, 255, 60], [40, 255, 20], [120, 255, 0], [230, 220, 0],
+        [255, 140, 0], [255, 60, 0], [255, 15, 20], [255, 0, 110]
+      ];
+
+      for (let i = 0; i < 8; i++) {
+        let dot = document.getElementById('ext-dot-' + i);
+        if (!dot) continue;
+        let ledThresh = i;
+        let c = vuCols[i];
+        let isPeak = (Math.floor(extVirtualPeak) === i && extVirtualPeak > 0.5);
+
+        if (isPeak) {
+          dot.style.background = '#ffffff';
+          dot.style.boxShadow = '0 0 12px #ffffff';
+          dot.style.borderColor = '#ffffff';
+        } else if (extVirtualVu >= ledThresh + 1.0) {
+          let cr = Math.round(c[0] * normBri);
+          let cg = Math.round(c[1] * normBri);
+          let cb = Math.round(c[2] * normBri);
+          dot.style.background = `rgb(${cr}, ${cg}, ${cb})`;
+          dot.style.boxShadow = `0 0 8px rgba(${cr}, ${cg}, ${cb}, 0.7)`;
+          dot.style.borderColor = `rgb(${cr}, ${cg}, ${cb})`;
+        } else if (extVirtualVu > ledThresh) {
+          let frac = (extVirtualVu - ledThresh) * normBri;
+          let cr = Math.round(c[0] * frac);
+          let cg = Math.round(c[1] * frac);
+          let cb = Math.round(c[2] * frac);
+          dot.style.background = `rgb(${cr}, ${cg}, ${cb})`;
+          dot.style.boxShadow = `0 0 5px rgba(${cr}, ${cg}, ${cb}, 0.5)`;
+          dot.style.borderColor = `rgba(${c[0]}, ${c[1]}, ${c[2]}, 0.5)`;
+        } else {
+          dot.style.background = '#151926';
+          dot.style.boxShadow = 'none';
+          dot.style.borderColor = '#334155';
+        }
+      }
+    } else {
+      // 2, 3, 4, 5: Dynamic animation preview
+      for (let i = 0; i < 8; i++) {
+        let dot = document.getElementById('ext-dot-' + i);
+        if (!dot) continue;
+        let h = (activeExtBarMode === 3) ? (now / 15 + i * 45) % 360 : (200 + i * 20) % 360;
+        let s = (intensity > 20) ? `hsl(${h}, 100%, 50%)` : '#151926';
+        dot.style.background = s;
+        dot.style.boxShadow = (intensity > 20) ? `0 0 8px ${s}` : 'none';
+        dot.style.borderColor = (intensity > 20) ? s : '#334155';
+      }
+    }
+  }
+
+  function renderVirtualExtBarDirect(rgbArray) {
+    for (let i = 0; i < 8; i++) {
+      let dot = document.getElementById('ext-dot-' + i);
+      if (dot) {
+        let r = rgbArray[i * 3] || 0;
+        let g = rgbArray[i * 3 + 1] || 0;
+        let b = rgbArray[i * 3 + 2] || 0;
+        dot.style.background = (r === 0 && g === 0 && b === 0) ? '#151926' : `rgb(${r},${g},${b})`;
+        dot.style.boxShadow = (r > 10 || g > 10 || b > 10) ? `0 0 8px rgba(${r},${g},${b},0.7)` : 'none';
+        dot.style.borderColor = (r > 10 || g > 10 || b > 10) ? `rgb(${r},${g},${b})` : '#334155';
+      }
+    }
   }
 
   // ====================================================================
@@ -3679,6 +4204,20 @@ void handleSetCustomSequence() {
 }
 
 // Wi-Fi Configuration API Handlers
+void handleSetExtRgb() {
+    if (server.hasArg("en")) {
+        extRgbEnabled = (server.arg("en").toInt() != 0);
+    }
+    if (server.hasArg("mode")) {
+        extRgbMode = (uint8_t)server.arg("mode").toInt();
+    }
+    if (server.hasArg("bri")) {
+        extBrightness = (uint8_t)server.arg("bri").toInt();
+    }
+    server.send(200, "text/plain", "OK");
+    Serial.printf("\r\n[Ext RGB] Enabled: %d, Mode: %d, Brightness: %d%%\n\rEnter command >> ", extRgbEnabled, extRgbMode, extBrightness);
+}
+
 void handleSetWiFi() {
     if (server.hasArg("ssid")) {
         String ssid = server.arg("ssid");
@@ -3775,6 +4314,41 @@ void processSerialProtocol(String cmd) {
         currentMode = -2;
         autoCycle = false;
     }
+    // !EXT:en,mode,bri
+    else if (cmd.startsWith("EXT:")) {
+        int c1 = cmd.indexOf(',', 4);
+        int c2 = cmd.indexOf(',', c1 + 1);
+        if (c1 != -1) {
+            extRgbEnabled = (cmd.substring(4, c1).toInt() != 0);
+            if (c2 != -1) {
+                extRgbMode = (uint8_t)cmd.substring(c1 + 1, c2).toInt();
+                extBrightness = (uint8_t)cmd.substring(c2 + 1).toInt();
+            } else {
+                extRgbMode = (uint8_t)cmd.substring(c1 + 1).toInt();
+            }
+        }
+    }
+    // !EXTD:r0,g0,b0;r1,g1,b1;... (Direct Framebuffer Streaming)
+    else if (cmd.startsWith("EXTD:")) {
+        String data = cmd.substring(5);
+        int start = 0;
+        int idx = 0;
+        while (start < data.length() && idx < 8) {
+            int semi = data.indexOf(';', start);
+            String item = (semi == -1) ? data.substring(start) : data.substring(start, semi);
+            int c1 = item.indexOf(',');
+            int c2 = item.indexOf(',', c1 + 1);
+            if (c1 != -1 && c2 != -1) {
+                extLeds[idx].r = item.substring(0, c1).toInt();
+                extLeds[idx].g = item.substring(c1 + 1, c2).toInt();
+                extLeds[idx].b = item.substring(c2 + 1).toInt();
+                idx++;
+            }
+            if (semi == -1) break;
+            start = semi + 1;
+        }
+        extRgbMode = 6;
+    }
 }
 
 // ====================================================================
@@ -3788,7 +4362,7 @@ void printMenu() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\r Home Network URL: http://%s (or http://esp32-rgb.local)\n\r", WiFi.localIP().toString().c_str());
     }
-    Serial.printf("\r Active Pin: GPIO %d | Brightness: %d%%\n\r", rgbPin, masterBrightness);
+    Serial.printf("\r Active Pin: GPIO %d | Brightness: %d%% | Ext 8-LED Bar: %s (Mode %d)\n\r", rgbPin, masterBrightness, extRgbEnabled ? "ON" : "OFF", extRgbMode);
     Serial.println("\r----------------------------------------------");
     Serial.println("\r [1] 🌌 Aurora Borealis      [11] 🪩 Disco Beat Reactive");
     Serial.println("\r [2] ⚡ Cyberpunk Pulse      [12] 🦇 Thriller Suspense");
@@ -3823,6 +4397,28 @@ void processTerminalInput(String input) {
     } else if (input == "-") {
         if (masterBrightness >= 15) masterBrightness -= 10; else masterBrightness = 5;
         Serial.printf("\r\n>> Brightness: %d%%\n\r", masterBrightness);
+    } else if (input.startsWith("ext ")) {
+        String sub = input.substring(4);
+        sub.trim();
+        if (sub.equalsIgnoreCase("on")) {
+            extRgbEnabled = true;
+            Serial.println("\r\n>> External 8-LED Bar turned ON!");
+        } else if (sub.equalsIgnoreCase("off")) {
+            extRgbEnabled = false;
+            Serial.println("\r\n>> External 8-LED Bar turned OFF!");
+        } else if (sub.startsWith("mode ")) {
+            int m = sub.substring(5).toInt();
+            if (m >= 0 && m <= 5) {
+                extRgbMode = m;
+                Serial.printf("\r\n>> External 8-LED Bar Mode set to %d!\n\r", m);
+            }
+        } else if (sub.startsWith("bri ")) {
+            int b = sub.substring(4).toInt();
+            if (b >= 0 && b <= 100) {
+                extBrightness = b;
+                Serial.printf("\r\n>> External 8-LED Bar Brightness set to %d%%\n\r", b);
+            }
+        }
     } else if (input.startsWith("pin ")) {
         int newPin = input.substring(4).toInt();
         if (newPin >= 0 && newPin <= 48) {
@@ -3923,8 +4519,28 @@ void setup() {
         Serial.println("[mDNS] Active! Hostname: http://esp32-rgb.local");
     }
 
+    // 0b. Setup External 8-LED RGB Module (Keyes ARTOU LED RGB V2)
+    for (int i = 0; i < 8; i++) {
+        pinMode(extDigitPins[i], OUTPUT);
+        digitalWrite(extDigitPins[i], HIGH); // Disable all PNP digits (Active LOW)
+    }
+    ledcSetup(EXT_LEDC_CH_R, EXT_LEDC_FREQ, EXT_LEDC_RES);
+    ledcSetup(EXT_LEDC_CH_G, EXT_LEDC_FREQ, EXT_LEDC_RES);
+    ledcSetup(EXT_LEDC_CH_B, EXT_LEDC_FREQ, EXT_LEDC_RES);
+    ledcAttachPin(PIN_EXT_R, EXT_LEDC_CH_R);
+    ledcAttachPin(PIN_EXT_G, EXT_LEDC_CH_G);
+    ledcAttachPin(PIN_EXT_B, EXT_LEDC_CH_B);
+    ledcWrite(EXT_LEDC_CH_R, 255);
+    ledcWrite(EXT_LEDC_CH_G, 255);
+    ledcWrite(EXT_LEDC_CH_B, 255);
+
+    // Launch FreeRTOS 1ms Multiplexer Task on Core 1
+    xTaskCreatePinnedToCore(extRgbMultiplexTask, "extRgbMux", 2048, NULL, 3, NULL, 1);
+    Serial.println("[Ext RGB] Initialized! 8-LED Multiplexer running at 125 FPS.");
+
     // 3. Setup Web Server Endpoints
     server.on("/", HTTP_GET, handleRoot);
+    server.on("/api/ext", HTTP_GET, handleSetExtRgb);
     server.on("/api/mode", HTTP_GET, handleSetMode);
     server.on("/api/color", HTTP_GET, handleSetColor);
     server.on("/api/brightness", HTTP_GET, handleSetBrightness);
@@ -4050,6 +4666,8 @@ void loop() {
         case -2: runCustomSequence(now); break;
         case 0:  setRGB(0, 0, 0); break;
     }
+
+    updateExternalRgbEffects(now);
 
     delay(4); // 250Hz cycle: responsive while letting FreeRTOS idle task run light sleep to keep chip cool
 }

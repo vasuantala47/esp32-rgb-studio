@@ -170,6 +170,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         ssid = query.get("ssid", [""])[0]
                         passw = query.get("pass", [""])[0]
                         cmd_str = f"!WIFI:{ssid},{passw}\n"
+                    elif path == "/api/ext":
+                        en = query.get("en", ["1"])[0]
+                        m = query.get("mode", query.get("m", ["0"]))[0]
+                        b = query.get("bri", query.get("b", ["100"]))[0]
+                        cmd_str = f"!EXT:{en},{m},{b}\n"
                     elif path == "/api/status":
                         self.send_response(200)
                         self.send_header("Content-Type", "text/plain")
